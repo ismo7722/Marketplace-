@@ -1,4 +1,4 @@
-"""Playwright browser options — visible Chromium by default for Facebook login."""
+"""Playwright browser — headless ON/OFF from dashboard; same 7 stages either way."""
 from __future__ import annotations
 
 from sqlalchemy.orm import Session
@@ -9,7 +9,7 @@ from app.models import ApplicationSetting
 
 
 def get_playwright_headless(db: Session | None = None) -> bool:
-    """False = visible Chromium (default for this bot). True = invisible headless scrape."""
+    """False = visible Chromium window. True = headless. Stages 1–7 are identical."""
     settings = get_settings()
     if settings.PLAYWRIGHT_HEADLESS is not None:
         return settings.PLAYWRIGHT_HEADLESS
@@ -28,13 +28,11 @@ def get_playwright_headless(db: Session | None = None) -> bool:
 
 
 def ensure_visible_browser_setting(db: Session) -> None:
-    """Dashboard seed may have headless=true — monitoring bot needs a visible window."""
+    """Default: visible browser (headless off). User changes this in Settings."""
     row = db.query(ApplicationSetting).filter(ApplicationSetting.key == "playwright_headless").first()
     if row is None:
         db.add(ApplicationSetting(key="playwright_headless", value="false", category="browser"))
-    elif row.value == "true":
-        row.value = "false"
-    db.commit()
+        db.commit()
 
 
 def get_playwright_timeout() -> int:

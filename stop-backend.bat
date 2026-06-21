@@ -1,5 +1,5 @@
 @echo off
-echo Stopping backend...
+echo Stopping backend worker...
 
 if exist "backend\data\backend.pid" (
     for /f %%p in (backend\data\backend.pid) do (
@@ -7,6 +7,11 @@ if exist "backend\data\backend.pid" (
         taskkill /PID %%p /F >nul 2>&1
     )
     del /f /q "backend\data\backend.pid" >nul 2>&1
+)
+
+for /f "tokens=2" %%a in ('wmic process where "CommandLine like '%%run_worker.py%%'" get ProcessId /format:list 2^>nul ^| findstr "="') do (
+    echo Killing run_worker.py PID %%a
+    taskkill /PID %%a /F >nul 2>&1
 )
 
 for %%P in (8000 8001) do (

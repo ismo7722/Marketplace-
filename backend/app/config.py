@@ -1,6 +1,12 @@
 from functools import lru_cache
+import os
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def is_cloud_host() -> bool:
+    """True on Render/Docker — no desktop; Playwright runs headless on the server."""
+    return bool(os.environ.get("RENDER", "").strip())
 
 
 class Settings(BaseSettings):
@@ -33,10 +39,10 @@ class Settings(BaseSettings):
     SMTP_USE_TLS: bool = True
 
     PLAYWRIGHT_TIMEOUT: int = 60000
-    # False = visible Chromium on Start (required for manual Facebook login)
-    PLAYWRIGHT_HEADLESS: bool | None = False
+    # None = use dashboard Settings toggle. False = visible Chromium, True = headless
+    PLAYWRIGHT_HEADLESS: bool | None = None
 
-    # Facebook — manual login only; session cookies in FACEBOOK_SESSION_FILE
+    # Facebook session cookies (restored on each scan)
     FACEBOOK_SESSION_FILE: str = "data/facebook_session.json"
     FACEBOOK_PROFILE_DIR: str = "data/facebook_chrome_profile"
 

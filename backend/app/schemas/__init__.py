@@ -236,6 +236,7 @@ class TestEmailRequest(BaseModel):
 
 class ManualScanResponse(BaseModel):
     status: str
+    message: str | None = None
     processed: int = 0
     matched: int = 0
     notified: int = 0

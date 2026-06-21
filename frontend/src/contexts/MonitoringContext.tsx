@@ -52,13 +52,13 @@ export function MonitoringProvider({ children }: { children: ReactNode }) {
     setToggling(true)
     try {
       await startBot()
-      toast("Bot ON — Chromium opening", "success")
+      toast("Bot ON — monitoring started", "success")
       setSettings((prev) => (prev ? { ...prev, is_enabled: true, is_scanning: true } : prev))
       await refresh()
     } catch (err: unknown) {
       const msg = axios.isAxiosError(err) && err.response?.data?.detail
         ? String(err.response.data.detail)
-        : "Start failed — restart backend (stop-backend.bat then start-backend.bat)"
+        : "Start failed — try again"
       toast(msg, "error")
     } finally {
       setToggling(false)

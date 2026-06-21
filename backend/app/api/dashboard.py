@@ -208,11 +208,11 @@ async def start_bot(
     _: None = Depends(require_db_ready),
     __: User = Depends(require_admin),
 ):
-    """Start = ON. Opens Chromium and runs until Stop."""
+    """Start = ON. Runs full Facebook flow (headless on Render, visible on local PC)."""
     await monitoring_service.start_bot()
     log_activity_isolated(
         LogCategory.MONITORING,
-        "Bot ON — opening Chromium",
+        "Bot ON — starting Facebook monitoring (all stages)",
         source="monitor",
     )
     _launch_monitoring_background(force=True)

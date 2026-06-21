@@ -60,12 +60,12 @@ async def check_monitoring_due():
             return
 
         now = datetime.now(timezone.utc)
-        if monitoring.next_scan_at is None or now < monitoring.next_scan_at:
+        if monitoring.next_scan_at is not None and now < monitoring.next_scan_at:
             return
 
         logger.info(
             "Monitoring interval reached — reloading /vehicles (due %s)",
-            monitoring.next_scan_at.isoformat(),
+            monitoring.next_scan_at.isoformat() if monitoring.next_scan_at else "now",
         )
 
         async def _run_scheduled_scan() -> None:
@@ -100,7 +100,7 @@ async def resume_monitoring_on_startup():
 
             run_async_in_thread(_run_startup_scan, name="monitoring-startup")
         elif monitoring.next_scan_at is None:
-            logger.info("Monitoring ON — Chrome already open, waiting for next cycle")
+            logger.info("Monitoring ON — browser already open, waiting for next cycle")
         else:
             logger.info("Monitoring ON — next cycle already scheduled")
     elif monitoring and monitoring.is_enabled:

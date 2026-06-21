@@ -286,10 +286,10 @@ class FacebookMarketplaceSource(BaseMarketplaceSource):
         log,
     ) -> tuple[Playwright, Browser | None, BrowserContext, Page]:
         playwright = await asyncio.wait_for(async_playwright().start(), timeout=60)
-        if not headless:
-            log("Stage 0/7 — Opening Playwright Chromium (saved session cookies)")
+        if headless:
+            log("Stage 0/7 — Opening Chromium (headless — Stages 1–7)", {"headless": True})
         else:
-            log("Stage 0/7 — Opening Chromium (headless)", {"headless": headless})
+            log("Stage 0/7 — Opening Chromium window (visible — Stages 1–7)", {"headless": False})
         context, page, browser = await launch_facebook_context(playwright, cfg, headless=headless)
         return playwright, browser, context, page
 
@@ -317,10 +317,14 @@ class FacebookMarketplaceSource(BaseMarketplaceSource):
         nav_timeout = max(cfg.PLAYWRIGHT_TIMEOUT, 120000)
 
         if not self.has_live_browser():
-            log("Opening Playwright Chromium — going to Facebook Marketplace", {"headless": False})
+            headless = get_playwright_headless(None)
+            log(
+                "Opening Playwright Chromium — Facebook Marketplace",
+                {"headless": headless},
+            )
             playwright = await asyncio.wait_for(async_playwright().start(), timeout=60)
             context, page, browser = await launch_facebook_context(
-                playwright, cfg, headless=False
+                playwright, cfg, headless=headless
             )
             self._store_session(playwright, browser, context, page)
         else:

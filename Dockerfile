@@ -20,4 +20,4 @@ ENV PORT=8000
 
 # Use shell form so $PORT expands at runtime; run module as `app.main:app` so
 # inside the container `import app` works (package is at /app/backend/app).
-CMD ["sh", "-c", "gunicorn -k uvicorn.workers.UvicornWorker -b 0.0.0.0:${PORT:-8000} app.main:app"]
+CMD ["sh", "-c", "xvfb-run -a gunicorn -k uvicorn.workers.UvicornWorker -w 1 --timeout 300 -b 0.0.0.0:${PORT:-8000} app.main:app"]

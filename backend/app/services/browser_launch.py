@@ -1,4 +1,4 @@
-"""Playwright Chromium — session cookies in facebook_session.json (no Chrome profile)."""
+"""Playwright Chromium — session cookies in facebook_session.json."""
 from __future__ import annotations
 
 import asyncio
@@ -7,7 +7,7 @@ from pathlib import Path
 
 from playwright.async_api import Browser, BrowserContext, Page, Playwright
 
-from app.config import Settings
+from app.config import Settings, is_cloud_host
 from app.playwright_browsers import configure_playwright_browsers_path, is_chromium_installed
 from app.services.facebook_session import USER_AGENT, session_file
 
@@ -24,6 +24,23 @@ _VISIBLE_ARGS = [
     "--window-size=1920,1080",
     "--force-device-scale-factor=1",
 ]
+
+# Required on Linux/Docker (Render) for both headless and visible modes
+_LINUX_ARGS = [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-gpu",
+]
+
+
+def _launch_args(headless: bool) -> list[str]:
+    args: list[str] = []
+    if is_cloud_host() or headless:
+        args.extend(_LINUX_ARGS)
+    if not headless:
+        args.extend(_VISIBLE_ARGS)
+    return args
 
 
 def _context_kwargs(cfg: Settings, *, headless: bool) -> dict:
@@ -47,33 +64,37 @@ async def launch_facebook_context(
     *,
     headless: bool,
 ) -> tuple[BrowserContext, Page, Browser | None]:
-    """Playwright bundled Chromium — cookies restored from facebook_session.json."""
     if not is_chromium_installed():
-        raise RuntimeError(
-            "Playwright Chromium is not installed. Run install-chromium.bat once, then Start ON."
+        hint = (
+            "Playwright Chromium missing — redeploy backend (Dockerfile)."
+            if is_cloud_host()
+            else "Run install-chromium.bat once, then press Start."
         )
+        raise RuntimeError(hint)
     try:
         browser = await asyncio.wait_for(
             playwright.chromium.launch(
                 headless=headless,
-                args=None if headless else list(_VISIBLE_ARGS),
+                args=_launch_args(headless),
             ),
             timeout=LAUNCH_TIMEOUT_SECONDS,
         )
     except Exception as exc:
         msg = str(exc)
         if "Executable doesn't exist" in msg or "playwright install" in msg.lower():
-            raise RuntimeError(
-                "Playwright Chromium is not installed. Run install-chromium.bat once "
-                "(one-time ~180 MB download), then press Start ON again."
-            ) from exc
+            hint = (
+                "Playwright Chromium not found on server."
+                if is_cloud_host()
+                else "Run install-chromium.bat once, then press Start again."
+            )
+            raise RuntimeError(hint) from exc
         raise
     context = await browser.new_context(**_context_kwargs(cfg, headless=headless))
     page = await context.new_page()
     if not headless:
         await page.set_viewport_size(DESKTOP_VIEWPORT)
     logger.info(
-        "Playwright Chromium ready (headless=%s, session=%s)",
+        "Playwright ready (headless=%s, session=%s)",
         headless,
         session_file(cfg).exists(),
     )
@@ -84,7 +105,7 @@ async def launch_chromium(playwright: Playwright, headless: bool) -> Browser:
     return await asyncio.wait_for(
         playwright.chromium.launch(
             headless=headless,
-            args=None if headless else list(_VISIBLE_ARGS),
+            args=_launch_args(headless),
         ),
         timeout=LAUNCH_TIMEOUT_SECONDS,
     )
