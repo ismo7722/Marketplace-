@@ -1408,9 +1408,11 @@ async def wait_then_open_vehicles(
     refresh: bool = True,
     context: BrowserContext | None = None,
 ) -> None:
-    """Logged-in Marketplace → wait full load → immediately /category/vehicles."""
+    """Logged-in Marketplace → Vehicles (prefer direct URL with price params)."""
+    target_url = vehicles_category_url(min_price=min_price, max_price=max_price)
+
     if _is_on_vehicles_page(page):
-        log("Stage 4/5 — Already on Vehicles page", {"url": clean_fb_url(page.url)})
+        log("Stage 4/5 — Already on Vehicles page", {"url": page.url})
         await stage_open_vehicles_category(
             page,
             log,
@@ -1423,39 +1425,23 @@ async def wait_then_open_vehicles(
         return
 
     t0 = time.monotonic()
-    log("Stage 4/5 — Waiting for Marketplace before Vehicles", {"url": clean_fb_url(page.url)})
-    await _wait_marketplace_ready(page, log, "Stage 4/5", context=context, timeout_sec=45)
-    try:
-        await page.wait_for_load_state("domcontentloaded", timeout=15000)
-    except Exception:
-        pass
-    try:
-        await page.wait_for_load_state("networkidle", timeout=10000)
-    except Exception:
-        pass
-    load_sec = round(time.monotonic() - t0, 2)
-    log(
-        "Stage 4/5 — Opening Vehicles (Zurich + price filter URL)",
-        {"marketplace_url": clean_fb_url(page.url), "load_seconds": load_sec},
-    )
+    if await _is_marketplace_ready(page, context):
+        log("Stage 4/5 — Marketplace ready — opening Vehicles", {"url": clean_fb_url(page.url)})
+    else:
+        log("Stage 4/5 — Waiting for Marketplace before Vehicles", {"url": clean_fb_url(page.url)})
+        await _wait_marketplace_ready(page, log, "Stage 4/5", context=context, timeout_sec=12)
 
+    log("Stage 4/5 — Opening Vehicles (Zurich + price filter URL)", {"url": target_url})
     t_nav = time.monotonic()
-    await stage_open_vehicles_category(
-        page,
-        log,
-        nav_timeout=nav_timeout,
-        location=location,
-        min_price=min_price,
-        max_price=max_price,
-        refresh=refresh,
-    )
-    nav_elapsed = round(time.monotonic() - t_nav, 2)
+    await _safe_goto(page, target_url, log, "Stage 4/5", nav_timeout=nav_timeout)
+    await asyncio.sleep(0.8)
+    await _wait_vehicles_filters_ready(page, log, timeout_ms=4000, require_location=False)
     log(
         "Stage 4/5 — Vehicles navigation complete",
         {
-            "url": clean_fb_url(page.url),
-            "navigation_seconds": nav_elapsed,
-            "total_from_load_start": round(time.monotonic() - t0, 2),
+            "url": page.url,
+            "navigation_seconds": round(time.monotonic() - t_nav, 2),
+            "total_seconds": round(time.monotonic() - t0, 2),
         },
     )
 
@@ -1726,76 +1712,46 @@ async def prepare_vehicles_monitoring_page(
     context: BrowserContext | None = None,
 ) -> None:
     """
-    Stage 4/5 — Open Vehicles with filter price in URL.
-    Skip Zurich location + price UI when sidebar/URL already matches the filter.
+    Stage 4/5 — Open Vehicles with price in URL, then hand off to Stage 5.
+    No slow sidebar location/price UI here — that blocked monitoring after navigation.
     """
-    await wait_then_open_vehicles(
-        page,
-        log,
-        nav_timeout=nav_timeout,
-        location=location,
-        min_price=min_price,
-        max_price=max_price,
-        refresh=False,
-        context=context,
-    )
+    target_url = vehicles_category_url(min_price=min_price, max_price=max_price)
+    t_nav = time.monotonic()
 
-    location_ok, price_ok, sidebar_loc, price_state = await filters_match_on_page(
-        page, location, min_price, max_price
-    )
-
-    if location_ok and price_ok:
-        log(
-            "Stage 4/5 — Vehicles ready — Zurich + price filter applied (skipped)",
-            {
-                "location": sidebar_loc["raw"] if sidebar_loc else location.label,
-                "min_price": price_state.get("input_min_value"),
-                "max_price": price_state.get("input_max_value"),
-                "url": page.url,
-            },
-        )
-        return
-
-    if location_ok:
-        log(
-            "Stage 4/5 — Zurich location OK — skipped",
-            {"current": sidebar_loc["raw"] if sidebar_loc else location.label},
-        )
+    if _is_on_vehicles_page(page):
+        url_min, url_max = _price_query_from_url(page.url)
+        want_price = (min_price is not None and min_price > 0) or (max_price is not None and max_price > 0)
+        has_price_in_url = url_min is not None or url_max is not None
+        if want_price and not has_price_in_url:
+            log("Stage 4/5 — Adding price filter to Vehicles URL", {"url": target_url})
+            await _safe_goto(page, target_url, log, "Stage 4/5", nav_timeout=nav_timeout)
+            await asyncio.sleep(0.8)
+        elif page.url.split("?")[0].rstrip("/") != target_url.split("?")[0].rstrip("/"):
+            log("Stage 4/5 — Navigating to Vehicles filter URL", {"url": target_url})
+            await _safe_goto(page, target_url, log, "Stage 4/5", nav_timeout=nav_timeout)
+            await asyncio.sleep(0.8)
     else:
-        log("Stage 4/5 — Setting Zurich location (once)", {"wanted": location.label})
-        if not await stage_set_location(page, location, log):
-            log(
-                "Stage 4/5 — Keeping current Vehicles page location",
-                {"wanted": location.label},
-                level=LogLevel.WARNING,
-            )
+        if await _is_marketplace_ready(page, context):
+            log("Stage 4/5 — Marketplace ready — opening Vehicles directly", {"url": target_url})
+        else:
+            log("Stage 4/5 — Opening Vehicles (Zurich + price filter URL)", {"url": target_url})
+        await _safe_goto(page, target_url, log, "Stage 4/5", nav_timeout=nav_timeout)
+        await asyncio.sleep(0.8)
 
-    if price_ok:
-        log(
-            "Stage 4/5 — Price filter OK — skipped",
-            {
-                "wanted_min": int(min_price) if min_price and min_price > 0 else None,
-                "wanted_max": int(max_price) if max_price and max_price > 0 else None,
-                "sidebar_min": price_state.get("input_min_value"),
-                "sidebar_max": price_state.get("input_max_value"),
-            },
-        )
-        return
+    await _wait_vehicles_filters_ready(page, log, timeout_ms=4000, require_location=False)
 
-    try:
-        await stage_apply_vehicle_price(page, min_price, max_price, log)
-    except RuntimeError as exc:
-        _, price_ok_after, _, price_state_after = await filters_match_on_page(
-            page, location, min_price, max_price
-        )
-        if price_ok_after:
-            log(
-                "Stage 4/5 — Price verified on Vehicles page",
-                {"error": str(exc), **price_state_after},
-                level=LogLevel.WARNING,
-            )
-            return
-        raise
+    log(
+        "Stage 4/5 — Vehicles navigation complete",
+        {
+            "url": page.url,
+            "target_url": target_url,
+            "navigation_seconds": round(time.monotonic() - t_nav, 2),
+        },
+    )
+    log(
+        "Stage 4/5 — Handoff to monitoring (scroll + match listings)",
+        {"url": page.url, "location": location.label},
+    )
 
 
 _EXTRACT_LISTING_DETAIL_JS = """

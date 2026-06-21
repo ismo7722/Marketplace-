@@ -477,25 +477,48 @@ class FacebookMarketplaceSource(BaseMarketplaceSource):
                     nav_timeout=nav_timeout,
                 )
             else:
-                await prepare_vehicles_monitoring_page(
-                    page,
-                    log,
-                    location,
-                    scrape_params.price_min,
-                    scrape_params.price_max,
-                    nav_timeout=nav_timeout,
-                    context=context,
-                )
+                try:
+                    await prepare_vehicles_monitoring_page(
+                        page,
+                        log,
+                        location,
+                        scrape_params.price_min,
+                        scrape_params.price_max,
+                        nav_timeout=nav_timeout,
+                        context=context,
+                    )
+                except Exception as exc:
+                    if not _is_on_vehicles_page(page):
+                        raise
+                    log(
+                        "Stage 4/5 — Vehicles page open — continuing to monitoring despite filter step issue",
+                        {"error": str(exc), "url": page.url},
+                        level=LogLevel.WARNING,
+                    )
                 self._mark_session_filters(page, location, scrape_params)
-                log("Stage 5/5 — Monitoring — scanning listings", {"url": page.url})
-                listings = await self._apply_listings_pass(
-                    page,
-                    log,
-                    criteria,
-                    max_results,
-                    scroll_passes=4,
-                    nav_timeout=nav_timeout,
+                log(
+                    "Stage 5/5 — Monitoring started — scrolling and matching listings",
+                    {"url": page.url},
                 )
+                try:
+                    listings = await self._apply_listings_pass(
+                        page,
+                        log,
+                        criteria,
+                        max_results,
+                        scroll_passes=4,
+                        nav_timeout=nav_timeout,
+                    )
+                except Exception as exc:
+                    if _is_on_vehicles_page(page):
+                        log(
+                            "Stage 5/5 — Listing scan issue on Vehicles page — will retry next cycle",
+                            {"error": str(exc), "url": page.url},
+                            level=LogLevel.WARNING,
+                        )
+                        listings = []
+                    else:
+                        raise
 
             await save_session(context, cfg)
             self._store_session(playwright, browser, context, page)
