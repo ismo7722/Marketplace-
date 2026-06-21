@@ -14,5 +14,5 @@ if errorlevel 1 (
 )
 echo.
 echo Done. Chromium is in backend\playwright-browsers
-echo Now run start-backend.bat and press Start ON.
+echo Now run start-backend.bat and open https://facebook-monitoring.vercel.app
 pause

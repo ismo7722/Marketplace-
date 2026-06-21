@@ -34,8 +34,9 @@ api.interceptors.response.use(
 export default api
 
 export async function checkBackendHealth(): Promise<{ ok: boolean; status: string; database: string; ready?: boolean }> {
+  const timeoutMs = isLiveDeployment ? 60000 : 5000
   try {
-    const res = await axios.get(getHealthUrl(), { timeout: 5000 })
+    const res = await axios.get(getHealthUrl(), { timeout: timeoutMs })
     const status = res.data?.status ?? "unknown"
     const database = res.data?.database ?? "unknown"
     const ready = Boolean(res.data?.ready)
@@ -54,9 +55,9 @@ export function loginErrorMessage(error: unknown): string {
   if (axios.isAxiosError(error)) {
     if (!error.response) {
       if (isLiveDeployment) {
-        return "Cannot reach the backend — run start-backend.bat and start-tunnel.bat, set BACKEND_URL on Vercel, then redeploy."
+        return "Cannot reach the backend — the server may still be starting. Wait 30 seconds and try again."
       }
-      return "Backend not reachable — run start-backend.bat first (port 8000)."
+      return "Backend not reachable — start the backend on port 8000, then try again."
     }
     const detail = error.response.data?.detail
     if (typeof detail === "string") return detail

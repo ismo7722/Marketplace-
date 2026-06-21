@@ -1,20 +1,15 @@
 import { writeFileSync } from "node:fs"
 
-const backend = (process.env.BACKEND_URL ?? "").trim().replace(/\/$/, "")
+const DEFAULT_BACKEND = "https://facebook-monitoring-t4py.onrender.com"
+const backend = (process.env.BACKEND_URL ?? DEFAULT_BACKEND).trim().replace(/\/$/, "")
 
 /** @type {{ source: string; destination: string }[]} */
-const rewrites = []
+const rewrites = [
+  { source: "/api/:path*", destination: `${backend}/api/:path*` },
+  { source: "/health", destination: `${backend}/health` },
+  { source: "/(.*)", destination: "/index.html" },
+]
 
-if (backend) {
-  rewrites.push(
-    { source: "/api/:path*", destination: `${backend}/api/:path*` },
-    { source: "/health", destination: `${backend}/health` },
-  )
-  console.log(`[vercel] Proxy /api and /health -> ${backend}`)
-} else {
-  console.warn("[vercel] BACKEND_URL not set — dashboard UI only until you add your tunnel URL on Vercel")
-}
-
-rewrites.push({ source: "/(.*)", destination: "/index.html" })
+console.log(`[vercel] Proxy /api and /health -> ${backend}`)
 
 writeFileSync("vercel.json", `${JSON.stringify({ rewrites }, null, 2)}\n`)
