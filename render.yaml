@@ -1,0 +1,26 @@
+# Render service configuration (example). Fill repo/branch as needed.
+version: 0
+services:
+  - type: web
+    name: facebook-monitoring-backend
+    env: docker
+    plan: free
+    branch: main
+    # Optional: add your repo URL here if using render's deploy hooks
+    # repo: https://github.com/your-org/your-repo
+    dockerfilePath: Dockerfile
+    envVars:
+      - key: DATABASE_URL
+        value: ""
+      - key: SECRET_KEY
+        value: ""
+      - key: ADMIN_EMAIL
+        value: ""
+      - key: SMTP_HOST
+        value: ""
+      - key: SMTP_PORT
+        value: ""
+      - key: SMTP_USER
+        value: ""
+      - key: SMTP_PASSWORD
+        value: ""
