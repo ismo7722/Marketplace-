@@ -1,18 +1,21 @@
 FROM mcr.microsoft.com/playwright/python:latest
 
-WORKDIR /app
+# Place the backend at /app/backend and run from there so `import app` resolves
+WORKDIR /app/backend
 
-# Copy only what's needed for the backend
-COPY backend/ ./backend/
+# Copy backend sources into container working dir
+COPY backend/ .
 
-RUN pip install --no-cache-dir -r backend/requirements.txt
+# Install Python deps
+ENV PYTHONUNBUFFERED=1
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Install Playwright browsers and OS deps
 RUN python -m playwright install --with-deps || true
 
 EXPOSE 8000
-
-ENV PYTHONUNBUFFERED=1
 ENV PORT=8000
 
-CMD ["sh", "-c", "gunicorn -k uvicorn.workers.UvicornWorker -b 0.0.0.0:${PORT:-8000} backend.app.main:app"]
+# Use shell form so $PORT expands at runtime; run module as `app.main:app` so
+# inside the container `import app` works (package is at /app/backend/app).
+CMD ["sh", "-c", "gunicorn -k uvicorn.workers.UvicornWorker -b 0.0.0.0:${PORT:-8000} app.main:app"]
