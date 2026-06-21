@@ -23,7 +23,9 @@ from app.services.facebook_session import (
 from app.services.facebook_flow import (
     MarketplaceLocation,
     _create_context,
+    _is_on_vehicles_page,
     _make_db_logger,
+    filters_match_on_page,
     stage_apply_vehicle_price,
     stage_enrich_listing_details,
     stage_ensure_login,
@@ -412,6 +414,26 @@ class FacebookMarketplaceSource(BaseMarketplaceSource):
 
             session_valid = self._is_filters_session_valid(page, location, scrape_params)
 
+            if not session_valid and _is_on_vehicles_page(page):
+                location_ok, price_ok, sidebar_loc = await filters_match_on_page(
+                    page,
+                    location,
+                    scrape_params.price_min,
+                    scrape_params.price_max,
+                )
+                if location_ok and price_ok:
+                    log(
+                        "Filters already applied on Vehicles page — skipping setup",
+                        {
+                            "location": sidebar_loc["raw"] if sidebar_loc else location.label,
+                            "url": page.url,
+                        },
+                    )
+                    self._session_location_key = self._location_key(location)
+                    self._session_price_key = self._price_key(scrape_params)
+                    self._session_vehicles_url = page.url
+                    session_valid = True
+
             if session_valid:
                 refresh_url = self._session_vehicles_url or page.url
                 log(
@@ -441,8 +463,50 @@ class FacebookMarketplaceSource(BaseMarketplaceSource):
                     refresh=False,
                     context=context,
                 )
-                await stage_set_location(page, location, log)
-                await stage_apply_vehicle_price(page, scrape_params.price_min, scrape_params.price_max, log)
+
+                location_ok, price_ok, sidebar_loc = await filters_match_on_page(
+                    page,
+                    location,
+                    scrape_params.price_min,
+                    scrape_params.price_max,
+                )
+
+                if location_ok:
+                    log(
+                        "Stage 4/7 — Location already set on Facebook, skipping change",
+                        {"current": sidebar_loc["raw"] if sidebar_loc else location.label},
+                    )
+                else:
+                    if not await stage_set_location(page, location, log):
+                        log(
+                            "Stage 4/7 — Location not changed — continuing with current Vehicles page",
+                            {"wanted": location.label},
+                            level=LogLevel.WARNING,
+                        )
+
+                if price_ok:
+                    log("Stage 5/7 — Price already set on Facebook, skipping change")
+                else:
+                    try:
+                        await stage_apply_vehicle_price(
+                            page, scrape_params.price_min, scrape_params.price_max, log
+                        )
+                    except RuntimeError as exc:
+                        _, price_ok_after, _ = await filters_match_on_page(
+                            page,
+                            location,
+                            scrape_params.price_min,
+                            scrape_params.price_max,
+                        )
+                        if price_ok_after:
+                            log(
+                                "Stage 5/7 — Price verified on page despite input issue",
+                                {"error": str(exc)},
+                                level=LogLevel.WARNING,
+                            )
+                        else:
+                            raise
+
                 self._session_location_key = self._location_key(location)
                 self._session_price_key = self._price_key(scrape_params)
                 self._session_vehicles_url = page.url

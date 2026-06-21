@@ -507,19 +507,98 @@ def _location_row_locator(page: Page):
     return sidebar.locator('span[dir="auto"]').filter(has_text=SIDEBAR_LOCATION_PATTERN)
 
 
+def _price_already_matches(
+    state: dict,
+    min_price: float | None,
+    max_price: float | None,
+) -> bool:
+    wanted_min = int(min_price) if min_price and min_price > 0 else None
+    wanted_max = int(max_price) if max_price and max_price > 0 else None
+    if wanted_min is None and wanted_max is None:
+        return True
+
+    got_min = state.get("input_min_value")
+    if got_min is None and state.get("url_min_price"):
+        got_min = _normalize_price_digits(str(state.get("url_min_price")))
+    got_max = state.get("input_max_value")
+    if got_max is None and state.get("url_max_price"):
+        got_max = _normalize_price_digits(str(state.get("url_max_price")))
+
+    if wanted_min is not None:
+        if got_min is None or abs(got_min - wanted_min) > max(500, int(wanted_min * 0.02)):
+            return False
+    if wanted_max is not None:
+        if got_max is None or abs(got_max - wanted_max) > max(500, int(wanted_max * 0.02)):
+            return False
+    return True
+
+
+async def filters_match_on_page(
+    page: Page,
+    location: MarketplaceLocation,
+    min_price: float | None,
+    max_price: float | None,
+) -> tuple[bool, bool, dict | None]:
+    """Return (location_ok, price_ok, sidebar_location). Reads sidebar — no dialog clicks."""
+    sidebar_loc = await _read_sidebar_location(page)
+    if not sidebar_loc:
+        await asyncio.sleep(0.4)
+        sidebar_loc = await _read_sidebar_location(page)
+    location_ok = bool(sidebar_loc and _location_already_matches(sidebar_loc, location))
+    price_state = await _read_price_filter_state(page)
+    price_ok = _price_already_matches(price_state, min_price, max_price)
+    return location_ok, price_ok, sidebar_loc
+
+
+async def _sidebar_filters_visible(page: Page) -> bool:
+    coords = await _find_location_row_coords(page)
+    if coords:
+        return True
+    try:
+        return bool(
+            await page.evaluate(
+                """
+                () => {
+                    const sidebar =
+                        document.querySelector('[data-pagelet="MarketplaceLeftRail"]') ||
+                        document.querySelector('[data-pagelet="MarketplaceSidebar"]') ||
+                        document.querySelector('aside');
+                    const blob = sidebar ? sidebar.innerText : document.body.innerText;
+                    return blob.includes('Filters') || /Within\\s+\\d+\\s*(km|mi|miles|kilomet)/i.test(blob);
+                }
+                """
+            )
+        )
+    except Exception:
+        return False
+
+
 async def _wait_vehicles_filters_ready(
     page: Page,
     log: LogFn,
-    timeout_ms: int = 5000,
+    timeout_ms: int = 4000,
     *,
     require_location: bool = False,
 ) -> bool:
-    """Wait for Filters sidebar. Location row only required after Stage 4."""
+    """Wait for Vehicles sidebar. Skip long wait when location row is already visible."""
+    await _scroll_sidebar_filters(page)
+
+    loc_coords = await _find_location_row_coords(page)
+    if loc_coords and not require_location:
+        log(
+            "Stage 3/7 — Vehicles sidebar ready (location already visible)",
+            {"location": loc_coords["text"]},
+        )
+        return True
+
+    if await _sidebar_filters_visible(page) and not require_location:
+        log("Stage 3/7 — Vehicles filters sidebar ready")
+        return True
+
     log(
-        "Stage 3/7 — Waiting for Filters sidebar on Vehicles page",
+        "Stage 3/7 — Waiting for Vehicles filters sidebar",
         {"timeout_ms": timeout_ms, "require_location": require_location},
     )
-    await _scroll_sidebar_filters(page)
     try:
         if require_location:
             check_js = """
@@ -542,18 +621,37 @@ async def _wait_vehicles_filters_ready(
                     document.querySelector('[data-pagelet="MarketplaceSidebar"]') ||
                     document.querySelector('aside');
                 const blob = sidebar ? sidebar.innerText : document.body.innerText;
-                return blob.includes('Filters');
+                return blob.includes('Filters') || /Within\\s+\\d+\\s*(km|mi|miles|kilomet)/i.test(blob);
             }
             """
         await page.wait_for_function(check_js, timeout=timeout_ms)
         await _scroll_sidebar_filters(page)
         return True
     except Exception:
+        if await _sidebar_filters_visible(page):
+            log("Stage 3/7 — Vehicles filters sidebar ready (slow load)")
+            return True
         log(
-            "Stage 3/7 — Filters sidebar slow to load — continuing",
+            "Stage 3/7 — Filters sidebar slow to load — continuing anyway",
             level=LogLevel.WARNING,
         )
         return False
+
+
+async def _read_sidebar_location_with_retries(
+    page: Page,
+    *,
+    attempts: int = 5,
+    delay_sec: float = 0.5,
+) -> dict | None:
+    current = await _read_sidebar_location(page)
+    for _ in range(attempts - 1):
+        if current:
+            return current
+        await _scroll_sidebar_filters(page)
+        await asyncio.sleep(delay_sec)
+        current = await _read_sidebar_location(page)
+    return current
 
 
 async def _find_location_row_coords(page: Page) -> dict | None:
@@ -1036,10 +1134,7 @@ async def stage_set_location(page: Page, location: MarketplaceLocation, log: Log
         {"location": location.label, "radius_km": location.radius_km},
     )
 
-    current = await _read_sidebar_location(page)
-    if not current:
-        await asyncio.sleep(0.8)
-        current = await _read_sidebar_location(page)
+    current = await _read_sidebar_location_with_retries(page)
     if current and _location_already_matches(current, location):
         log(
             "Stage 4/7 — Location already correct on Facebook, skipping change",
@@ -1061,8 +1156,19 @@ async def stage_set_location(page: Page, location: MarketplaceLocation, log: Log
 
     dialog = await _open_location_dialog(page, log)
     if dialog is None:
-        log("Stage 4/7 — Change location dialog did not open", level=LogLevel.ERROR)
-        raise RuntimeError("Could not open Change location dialog on Vehicles page")
+        current = await _read_sidebar_location_with_retries(page, attempts=3)
+        if current and _location_already_matches(current, location):
+            log(
+                "Stage 4/7 — Location already correct (dialog skipped)",
+                {"current": current["raw"], "wanted": location.label},
+            )
+            return True
+        log(
+            "Stage 4/7 — Could not open location dialog — continuing with current page filters",
+            {"wanted": location.label},
+            level=LogLevel.WARNING,
+        )
+        return False
 
     try:
         log("Stage 4/7 — Typing location in dialog", {"location": location.label})
@@ -1195,9 +1301,9 @@ async def stage_open_vehicles_category(
         await asyncio.sleep(0.5)
 
     await _wait_vehicles_filters_ready(
-        page, log, timeout_ms=8000, require_location=False
+        page, log, timeout_ms=4000, require_location=False
     )
-    log("Stage 3/7 — Vehicles ready — setting location next", {"url": clean_fb_url(page.url)})
+    log("Stage 3/7 — Vehicles page ready", {"url": clean_fb_url(page.url)})
 
 
 async def _find_price_inputs(page: Page):
@@ -1336,6 +1442,18 @@ async def stage_apply_vehicle_price(
         {"min_price": min_price, "max_price": max_price},
     )
     await _require_scrape_page_ready(page, log, "Stage 5/7")
+
+    current_state = await _read_price_filter_state(page)
+    if _price_already_matches(current_state, min_price, max_price):
+        log(
+            "Stage 5/7 — Price already correct on Facebook, skipping change",
+            {
+                "wanted_min": int(min_price) if min_price and min_price > 0 else None,
+                "wanted_max": int(max_price) if max_price and max_price > 0 else None,
+                **current_state,
+            },
+        )
+        return True
 
     min_input, max_input = await _find_price_inputs(page)
     if not min_input or not max_input:

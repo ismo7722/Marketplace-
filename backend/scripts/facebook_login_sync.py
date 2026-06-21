@@ -5,13 +5,21 @@ import asyncio
 import logging
 import os
 import sys
+from pathlib import Path
+
+_BACKEND_ROOT = Path(__file__).resolve().parent.parent
+if str(_BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(_BACKEND_ROOT))
 
 os.environ["FACEBOOK_LOGIN_MODE"] = "1"
 
 from app.config import get_settings
+from app.playwright_browsers import configure_playwright_browsers_path
 from app.services.facebook_session import get_facebook_session_status, persist_session_file_to_db
 from app.sources.facebook import FacebookMarketplaceSource
 from app.startup_db import run_blocking_startup
+
+configure_playwright_browsers_path()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
