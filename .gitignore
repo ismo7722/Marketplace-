@@ -42,9 +42,6 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Generated on Vercel build (scripts/prepare-vercel.mjs)
-frontend/vercel.json
-
 # =========================
 # IDE / OS
 # =========================

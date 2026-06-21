@@ -9,6 +9,7 @@ import { Input, Label } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Spinner } from "@/components/ui/badge"
 import { checkBackendHealth, loginErrorMessage } from "@/lib/api"
+import { cn } from "@/lib/utils"
 
 export default function LoginPage() {
   const [email, setEmail] = useState("")
@@ -19,6 +20,8 @@ export default function LoginPage() {
   const { login } = useAuth()
   const { toast } = useToast()
   const navigate = useNavigate()
+
+  const canSubmit = backendStatus === "ready" && email.trim() && password
 
   useEffect(() => {
     let cancelled = false
@@ -34,13 +37,15 @@ export default function LoginPage() {
       }
       if (health.status === "starting" || health.database === "connecting") {
         setBackendStatus("connecting")
+      } else if (attempts === 0) {
+        setBackendStatus("checking")
       } else {
-        setBackendStatus("offline")
+        setBackendStatus(attempts < 25 ? "connecting" : "offline")
       }
 
       attempts += 1
-      if (attempts < 20 && !health.ok) {
-        setTimeout(poll, 2000)
+      if (attempts < 30 && !health.ok) {
+        setTimeout(poll, 3000)
       }
     }
 
@@ -53,7 +58,7 @@ export default function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (backendStatus !== "ready") {
-      toast("Backend not ready yet — wait for database connection", "warning")
+      toast("Backend not ready yet — wait a moment and try again", "warning")
       return
     }
     setLoading(true)
@@ -70,12 +75,12 @@ export default function LoginPage() {
 
   const statusMessage =
     backendStatus === "checking"
-      ? "Starting backend..."
+      ? "Connecting to server..."
       : backendStatus === "connecting"
-        ? "Connecting to database — please wait..."
+        ? "Server is starting — first visit can take up to 60 seconds..."
         : backendStatus === "offline"
-          ? "Backend offline — run start-backend.bat"
-          : "Enter your email and password to unlock"
+          ? "Cannot reach backend — wait and refresh, or try again in a minute"
+          : "Enter your email and password to sign in"
 
   return (
     <div className="flex min-h-screen">
@@ -123,10 +128,15 @@ export default function LoginPage() {
                 </div>
                 <Button
                   type="submit"
-                  className="w-full bg-[#1877F2] hover:bg-[#166fe5] font-semibold"
-                  disabled={loading || backendStatus !== "ready"}
+                  className={cn(
+                    "w-full font-semibold transition-colors",
+                    canSubmit
+                      ? "bg-[#1877F2] hover:bg-[#166fe5] text-white"
+                      : "bg-muted text-muted-foreground cursor-not-allowed"
+                  )}
+                  disabled={loading || !canSubmit}
                 >
-                  {loading ? <Spinner /> : "Sign In to Dashboard"}
+                  {loading ? <Spinner /> : backendStatus !== "ready" ? "Waiting for server..." : "Sign In to Dashboard"}
                 </Button>
               </form>
             </CardContent>

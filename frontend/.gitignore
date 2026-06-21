@@ -14,9 +14,6 @@ dist-ssr
 .env
 .env.local
 
-# Generated on Vercel build — see scripts/prepare-vercel.mjs
-vercel.json
-
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

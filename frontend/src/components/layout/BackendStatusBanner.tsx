@@ -42,8 +42,8 @@ export default function BackendStatusBanner() {
           <p className="font-semibold">Backend not connected</p>
           <p className="text-xs text-muted-foreground mt-0.5">
             {isLiveDeployment
-              ? "Backend offline — run start-backend.bat + start-tunnel.bat on your PC, confirm BACKEND_URL on Vercel, then redeploy."
-              : <>Run <code className="bg-muted px-1 rounded">start-backend.bat</code> (port 8000), then refresh.</>}
+              ? "Cannot reach the backend server. It may still be starting — wait 30–60 seconds and click Retry."
+              : "Start the local backend on port 8000, then click Retry."}
           </p>
         </div>
       </div>
