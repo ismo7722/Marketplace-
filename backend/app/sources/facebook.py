@@ -430,11 +430,8 @@ class FacebookMarketplaceSource(BaseMarketplaceSource):
             page.set_default_navigation_timeout(nav_timeout)
             page.set_default_timeout(nav_timeout)
 
-            if not await is_login_fully_complete(context, page):
-                if not await stage_ensure_login(page, context, cfg, log, db):
-                    raise RuntimeError("Facebook login not completed — finish login in the browser window")
-            else:
-                log("Stage 2/5 — Logged in")
+            if not await stage_ensure_login(page, context, cfg, log, db):
+                raise RuntimeError("Facebook login not completed — run login-facebook.bat then Stop → Start")
 
             await self._ensure_marketplace_ready(page, context, cfg, log, nav_timeout=nav_timeout)
 

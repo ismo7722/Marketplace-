@@ -18,6 +18,8 @@ from app.services.facebook_session import (
     USER_AGENT,
     POST_LOGIN_SETTLE_SECONDS,
     dismiss_login_popup_once,
+    has_facebook_session_saved,
+    has_login_cookies,
     is_login_fully_complete,
     is_on_facebook_auth_flow,
     _is_login_required,
@@ -27,6 +29,8 @@ from app.services.facebook_session import (
     save_session,
     session_file,
     wait_passive_for_login,
+    MARKETPLACE_URL,
+    needs_marketplace_navigation,
 )
 from app.services.log_service import log_activity_isolated
 
@@ -460,18 +464,49 @@ async def stage_ensure_login(page: Page, context: BrowserContext, cfg: Settings,
     log("Stage 2/5 — Checking Facebook login")
     restore_session_file_from_db(cfg)
 
+    headless = get_playwright_headless(db)
+    on_server = is_cloud_host()
+    nav_timeout = max(cfg.PLAYWRIGHT_TIMEOUT, 120000)
+
+    async def _fail_logged_out() -> None:
+        log(f"Stage 2/5 — {LOGIN_REQUIRED_LOG}", level=LogLevel.WARNING)
+        await send_facebook_logout_alert()
+        raise FacebookLoginRequiredError(LOGIN_REQUIRED_LOG)
+
+    if headless and on_server:
+        if not has_facebook_session_saved(cfg):
+            await _fail_logged_out()
+
+        blank = page.url in ("about:blank", "") or page.url.startswith("chrome://")
+        if needs_marketplace_navigation(page) or blank:
+            log("Stage 2/5 — Loading saved Facebook session on Marketplace")
+            await page.goto(
+                MARKETPLACE_URL,
+                wait_until="domcontentloaded",
+                timeout=nav_timeout,
+            )
+            await asyncio.sleep(POST_LOGIN_SETTLE_SECONDS)
+
+        if await is_login_fully_complete(context, page):
+            log("Stage 2/5 — Logged in (saved session from database)")
+            await save_session(context, cfg)
+            return True
+
+        if await has_login_cookies(context):
+            log("Stage 2/5 — Session cookies loaded — refreshing Marketplace")
+            await reload_marketplace_after_login(page, cfg)
+            await asyncio.sleep(POST_LOGIN_SETTLE_SECONDS)
+            if await is_login_fully_complete(context, page):
+                log("Stage 2/5 — Logged in (saved session from database)")
+                await save_session(context, cfg)
+                return True
+
+        await _fail_logged_out()
+
     if await is_login_fully_complete(context, page):
         log("Stage 2/5 — Logged in (saved session)")
         await save_session(context, cfg)
         return True
-
-    headless = get_playwright_headless(db)
-    on_server = is_cloud_host()
-
-    if headless and on_server:
-        log(f"Stage 2/5 — {LOGIN_REQUIRED_LOG}", level=LogLevel.WARNING)
-        await send_facebook_logout_alert()
-        raise FacebookLoginRequiredError(LOGIN_REQUIRED_LOG)
 
     if is_on_facebook_auth_flow(page):
         log("Stage 2/5 — Complete Facebook login/verification in browser — bot is completely idle")
