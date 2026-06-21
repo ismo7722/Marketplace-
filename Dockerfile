@@ -13,5 +13,6 @@ RUN python -m playwright install --with-deps || true
 EXPOSE 8000
 
 ENV PYTHONUNBUFFERED=1
+ENV PORT=8000
 
-CMD ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", "-b", "0.0.0.0:$PORT", "backend.app.main:app"]
+CMD ["sh", "-c", "gunicorn -k uvicorn.workers.UvicornWorker -b 0.0.0.0:${PORT:-8000} backend.app.main:app"]
