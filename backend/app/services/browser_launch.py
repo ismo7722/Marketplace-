@@ -17,6 +17,9 @@ logger = logging.getLogger(__name__)
 
 LAUNCH_TIMEOUT_SECONDS = 90
 DESKTOP_VIEWPORT = {"width": 1920, "height": 1080}
+# Smaller viewport on Render — less GPU/RAM while scrolling listings
+CLOUD_VIEWPORT = {"width": 1280, "height": 800}
+_BLOCKED_RESOURCE_TYPES = frozenset({"image", "media", "font"})
 
 _VISIBLE_ARGS = [
     "--start-maximized",
@@ -31,6 +34,13 @@ _LINUX_ARGS = [
     "--disable-setuid-sandbox",
     "--disable-dev-shm-usage",
     "--disable-gpu",
+    "--disable-extensions",
+    "--disable-background-networking",
+    "--disable-default-apps",
+    "--disable-sync",
+    "--disable-translate",
+    "--mute-audio",
+    "--no-first-run",
 ]
 
 
@@ -43,12 +53,31 @@ def _launch_args(headless: bool) -> list[str]:
     return args
 
 
+def _viewport_for_host(*, headless: bool) -> dict:
+    if is_cloud_host() or headless:
+        return CLOUD_VIEWPORT
+    return DESKTOP_VIEWPORT
+
+
+async def enable_lightweight_browsing(context: BrowserContext) -> None:
+    """Block images/media/fonts on Render — keeps Chromium under memory limits."""
+
+    async def _handler(route, request) -> None:
+        if request.resource_type in _BLOCKED_RESOURCE_TYPES:
+            await route.abort()
+        else:
+            await route.continue_()
+
+    await context.route("**/*", _handler)
+
+
 def _context_kwargs(cfg: Settings, *, headless: bool) -> dict:
+    viewport = _viewport_for_host(headless=headless)
     kwargs: dict = {
         "locale": "en-US",
-        "viewport": DESKTOP_VIEWPORT,
+        "viewport": viewport,
         "device_scale_factor": 1,
-        "screen": {"width": 1920, "height": 1080},
+        "screen": {"width": viewport["width"], "height": viewport["height"]},
     }
     if headless:
         kwargs["user_agent"] = USER_AGENT
@@ -90,9 +119,11 @@ async def launch_facebook_context(
             raise RuntimeError(hint) from exc
         raise
     context = await browser.new_context(**_context_kwargs(cfg, headless=headless))
+    if is_cloud_host() or headless:
+        await enable_lightweight_browsing(context)
     page = await context.new_page()
     if not headless:
-        await page.set_viewport_size(DESKTOP_VIEWPORT)
+        await page.set_viewport_size(_viewport_for_host(headless=headless))
     logger.info(
         "Playwright ready (headless=%s, session=%s)",
         headless,

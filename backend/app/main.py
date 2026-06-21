@@ -11,7 +11,7 @@ from app.api import api_router
 from app.config import get_settings
 from app.database import check_database_connection, invalidate_pool
 from app.db_async import run_sync
-from app.services.scheduler import start_scheduler, stop_scheduler
+from app.services.scheduler import resume_monitoring_on_startup, start_scheduler, stop_scheduler
 from app.startup_db import run_blocking_startup
 
 # Import sources to register them
@@ -61,9 +61,11 @@ async def lifespan(app: FastAPI):
         logger.error("Startup: database unavailable — login and dashboard will return 503 until DB works")
 
     try:
-        await run_sync(start_scheduler, timeout=8)
+        start_scheduler()
     except Exception as exc:
         logger.warning("Startup: scheduler not started: %s", exc)
+
+    asyncio.create_task(resume_monitoring_on_startup())
 
     logger.info("Application ready")
     yield

@@ -102,17 +102,33 @@ def is_monitoring_busy() -> bool:
 
 
 def reset_stale_scanning_flag(db: Session) -> None:
-    """After restart: monitoring is OFF until user presses Start (no surprise Chromium)."""
+    """After restart: clear stale scan lock; keep monitoring ON if user had enabled it."""
     monitoring = db.query(MonitoringSetting).first()
     if not monitoring:
         return
-    if monitoring.is_scanning or monitoring.is_enabled:
-        monitoring.is_enabled = False
-        monitoring.is_scanning = False
+    if not monitoring.is_scanning and not monitoring.is_enabled:
+        return
+
+    was_enabled = monitoring.is_enabled
+    monitoring.is_scanning = False
+    if was_enabled:
         monitoring.next_scan_at = None
-        db.commit()
+    else:
+        monitoring.is_enabled = False
+        monitoring.next_scan_at = None
+    db.commit()
+
+    if was_enabled:
         log_activity(
-            db, LogCategory.MONITORING,
+            db,
+            LogCategory.MONITORING,
+            "Server restarted — monitoring still ON, resuming scan shortly",
+            source="monitor",
+        )
+    else:
+        log_activity(
+            db,
+            LogCategory.MONITORING,
             "Server restarted — monitoring OFF (press Start ON when ready)",
             source="monitor",
         )

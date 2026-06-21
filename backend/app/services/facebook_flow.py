@@ -1433,6 +1433,7 @@ async def wait_then_open_vehicles(
 
     log("Stage 4/5 — Opening Vehicles (Zurich + price filter URL)", {"url": target_url})
     t_nav = time.monotonic()
+    log("Stage 4/5 — Loading Vehicles page now", {"url": target_url})
     await _safe_goto(page, target_url, log, "Stage 4/5", nav_timeout=nav_timeout)
     await asyncio.sleep(0.8)
     await _wait_vehicles_filters_ready(page, log, timeout_ms=4000, require_location=False)
@@ -1712,41 +1713,17 @@ async def prepare_vehicles_monitoring_page(
     context: BrowserContext | None = None,
 ) -> None:
     """
-    Stage 4/5 — Open Vehicles with price in URL, then hand off to Stage 5.
-    No slow sidebar location/price UI here — that blocked monitoring after navigation.
+    Stage 4/5 — Same path as live verify script: Marketplace → Vehicles URL with price params.
     """
-    target_url = vehicles_category_url(min_price=min_price, max_price=max_price)
-    t_nav = time.monotonic()
-
-    if _is_on_vehicles_page(page):
-        url_min, url_max = _price_query_from_url(page.url)
-        want_price = (min_price is not None and min_price > 0) or (max_price is not None and max_price > 0)
-        has_price_in_url = url_min is not None or url_max is not None
-        if want_price and not has_price_in_url:
-            log("Stage 4/5 — Adding price filter to Vehicles URL", {"url": target_url})
-            await _safe_goto(page, target_url, log, "Stage 4/5", nav_timeout=nav_timeout)
-            await asyncio.sleep(0.8)
-        elif page.url.split("?")[0].rstrip("/") != target_url.split("?")[0].rstrip("/"):
-            log("Stage 4/5 — Navigating to Vehicles filter URL", {"url": target_url})
-            await _safe_goto(page, target_url, log, "Stage 4/5", nav_timeout=nav_timeout)
-            await asyncio.sleep(0.8)
-    else:
-        if await _is_marketplace_ready(page, context):
-            log("Stage 4/5 — Marketplace ready — opening Vehicles directly", {"url": target_url})
-        else:
-            log("Stage 4/5 — Opening Vehicles (Zurich + price filter URL)", {"url": target_url})
-        await _safe_goto(page, target_url, log, "Stage 4/5", nav_timeout=nav_timeout)
-        await asyncio.sleep(0.8)
-
-    await _wait_vehicles_filters_ready(page, log, timeout_ms=4000, require_location=False)
-
-    log(
-        "Stage 4/5 — Vehicles navigation complete",
-        {
-            "url": page.url,
-            "target_url": target_url,
-            "navigation_seconds": round(time.monotonic() - t_nav, 2),
-        },
+    await wait_then_open_vehicles(
+        page,
+        log,
+        nav_timeout=nav_timeout,
+        location=location,
+        min_price=min_price,
+        max_price=max_price,
+        refresh=False,
+        context=context,
     )
     log(
         "Stage 4/5 — Handoff to monitoring (scroll + match listings)",
