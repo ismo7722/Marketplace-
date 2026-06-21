@@ -334,7 +334,7 @@ export default function SettingsPage() {
               <p className="font-medium text-sm">Session status</p>
               <p className="text-xs text-muted-foreground mt-0.5">
                 {fbSession?.has_session
-                  ? "Logged in — Render can run all 7 stages headless"
+                  ? "Logged in — Render runs 5-step monitoring headless"
                   : "Not logged in — run login-facebook.bat on your PC before Start"}
               </p>
             </div>
@@ -345,7 +345,7 @@ export default function SettingsPage() {
           <p className="text-sm text-muted-foreground">
             1. Double-click <code className="bg-muted px-1 rounded">login-facebook.bat</code> on your PC<br />
             2. Log in to Facebook in the Chromium window (2FA ok)<br />
-            3. Dashboard → Stop → Start — Stages 1–7 run headless on the server
+            3. Dashboard → Stop → Start — 5 steps run headless on the server
           </p>
         </CardContent>
       </Card>

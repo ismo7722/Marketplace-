@@ -38,6 +38,26 @@ VEHICLES_CATEGORY_ID = "546583916084032"
 STEP_PAUSE = 1.5
 NAV_RETRIES = 3
 BEFORE_VEHICLES_DELAY_SECONDS = 5
+FLOW_STAGES = 5
+
+
+def vehicles_category_url(
+    *,
+    min_price: float | None = None,
+    max_price: float | None = None,
+) -> str:
+    """Vehicles page URL — include min/max price query params when set (verified on live Facebook)."""
+    from urllib.parse import urlencode
+
+    params: dict[str, str] = {}
+    if min_price is not None and min_price > 0:
+        params["minPrice"] = str(int(min_price))
+    if max_price is not None and max_price > 0:
+        params["maxPrice"] = str(int(max_price))
+    if not params:
+        return VEHICLES_CATEGORY_URL
+    params["exact"] = "false"
+    return f"{VEHICLES_CATEGORY_URL}?{urlencode(params)}"
 
 
 def clean_fb_url(url: str) -> str:
@@ -61,8 +81,112 @@ def _normalize_price_digits(value: str | None) -> int | None:
     return int(digits) if digits else None
 
 
+async def _scroll_price_filters(page: Page) -> None:
+    await page.evaluate(
+        """
+        () => {
+            const sidebar =
+                document.querySelector('[data-pagelet="MarketplaceLeftRail"]') ||
+                document.querySelector('[data-pagelet="MarketplaceSidebar"]') ||
+                document.querySelector('aside');
+            const root = sidebar || document;
+            for (const el of root.querySelectorAll('span, h2, label')) {
+                const t = (el.textContent || '').trim();
+                if (t === 'Price' || t.startsWith('Price range')) {
+                    el.scrollIntoView({ block: 'center', behavior: 'instant' });
+                    return;
+                }
+            }
+        }
+        """
+    )
+    await asyncio.sleep(0.25)
+
+
+async def _read_sidebar_price_values(page: Page) -> tuple[int | None, int | None]:
+    """Read Min/Max from Vehicles sidebar — works when Playwright input_value() is empty."""
+    await _scroll_price_filters(page)
+    result = await page.evaluate(
+        """
+        () => {
+            const norm = (v) => {
+                const digits = (v || '').replace(/[^\\d]/g, '');
+                return digits ? parseInt(digits, 10) : null;
+            };
+            const readInput = (inp) => {
+                if (!inp) return null;
+                const candidates = [
+                    inp.value,
+                    inp.getAttribute('value'),
+                    inp.getAttribute('aria-valuetext'),
+                    inp.getAttribute('aria-label'),
+                ];
+                for (const c of candidates) {
+                    const n = norm(c);
+                    if (n) return n;
+                }
+                const block = inp.closest('div');
+                if (block) {
+                    const m = (block.innerText || '').match(/[\\d'][\\d'.,]*/);
+                    if (m) return norm(m[0]);
+                }
+                return null;
+            };
+
+            const sidebar =
+                document.querySelector('[data-pagelet="MarketplaceLeftRail"]') ||
+                document.querySelector('[data-pagelet="MarketplaceSidebar"]') ||
+                document.querySelector('aside');
+            const root = sidebar || document;
+
+            let priceBlock = null;
+            for (const el of root.querySelectorAll('span, h2, label')) {
+                const t = (el.textContent || '').trim();
+                if (t === 'Price' || t.startsWith('Price range')) {
+                    priceBlock = el.closest('div')?.parentElement || el.closest('div');
+                    break;
+                }
+            }
+
+            const searchRoot = priceBlock || root;
+            const priceInputs = [...searchRoot.querySelectorAll('input')].filter((inp) => {
+                const r = inp.getBoundingClientRect();
+                if (r.width < 20 || r.height < 8) return false;
+                const ph = (inp.placeholder || '').toLowerCase();
+                const al = (inp.getAttribute('aria-label') || '').toLowerCase();
+                return (
+                    ph.includes('min') || ph.includes('max') ||
+                    al.includes('min') || al.includes('max') ||
+                    priceBlock !== null
+                );
+            });
+
+            if (priceInputs.length >= 2) {
+                priceInputs.sort((a, b) => a.getBoundingClientRect().x - b.getBoundingClientRect().x);
+                return { min: readInput(priceInputs[0]), max: readInput(priceInputs[1]) };
+            }
+
+            const minInp = [...root.querySelectorAll('input')].find((inp) => {
+                const ph = (inp.placeholder || '').toLowerCase();
+                const al = (inp.getAttribute('aria-label') || '').toLowerCase();
+                return ph.includes('min') || al.includes('min');
+            });
+            const maxInp = [...root.querySelectorAll('input')].find((inp) => {
+                const ph = (inp.placeholder || '').toLowerCase();
+                const al = (inp.getAttribute('aria-label') || '').toLowerCase();
+                return ph.includes('max') || al.includes('max');
+            });
+            return { min: readInput(minInp), max: readInput(maxInp) };
+        }
+        """
+    )
+    return result.get("min"), result.get("max")
+
+
 async def _read_price_filter_state(page: Page) -> dict:
     """Read Min/Max price from sidebar inputs and URL query params."""
+    js_min, js_max = await _read_sidebar_price_values(page)
+
     min_input, max_input = await _find_price_inputs(page)
     input_min = input_max = None
     if min_input:
@@ -77,14 +201,23 @@ async def _read_price_filter_state(page: Page) -> dict:
             pass
 
     url_min, url_max = _price_query_from_url(page.url)
+    input_min_value = _normalize_price_digits(input_min) or js_min
+    input_max_value = _normalize_price_digits(input_max) or js_max
+    if input_min_value is None and url_min:
+        input_min_value = _normalize_price_digits(str(url_min))
+    if input_max_value is None and url_max:
+        input_max_value = _normalize_price_digits(str(url_max))
+
     return {
         "url": page.url,
         "url_min_price": url_min,
         "url_max_price": url_max,
         "input_min": input_min or None,
         "input_max": input_max or None,
-        "input_min_value": _normalize_price_digits(input_min),
-        "input_max_value": _normalize_price_digits(input_max),
+        "input_min_value": input_min_value,
+        "input_max_value": input_max_value,
+        "sidebar_min_value": js_min,
+        "sidebar_max_value": js_max,
     }
 
 
@@ -163,12 +296,15 @@ async def _open_vehicles_page(
     *,
     nav_timeout: int,
     location: MarketplaceLocation | None = None,
+    min_price: float | None = None,
+    max_price: float | None = None,
 ) -> None:
-    """Marketplace done → open /category/vehicles (normal browser URL, no city pre-set)."""
-    log("Stage 3/7 — Opening Vehicles category", {"url": VEHICLES_CATEGORY_URL})
-    await _safe_goto(page, VEHICLES_CATEGORY_URL, log, "Stage 3/7", nav_timeout=nav_timeout)
+    """Marketplace done → open /category/vehicles (with price params in URL when configured)."""
+    target_url = vehicles_category_url(min_price=min_price, max_price=max_price)
+    log("Stage 4/5 — Opening Vehicles category", {"url": target_url})
+    await _safe_goto(page, target_url, log, "Stage 4/5", nav_timeout=nav_timeout)
     await asyncio.sleep(0.5)
-    log("Stage 3/7 — Vehicles category loaded", {"url": clean_fb_url(page.url)})
+    log("Stage 4/5 — Vehicles category loaded", {"url": clean_fb_url(page.url)})
 
 
 async def _require_scrape_page_ready(page: Page, log: LogFn, stage: str) -> None:
@@ -287,8 +423,8 @@ async def stage_open_marketplace(
     nav_timeout: int | None = None,
 ) -> None:
     timeout = nav_timeout or cfg.PLAYWRIGHT_TIMEOUT
-    log("Stage 1/7 — Opening Facebook Marketplace", {"url": "https://www.facebook.com/marketplace/"})
-    await _safe_goto(page, "https://www.facebook.com/marketplace/", log, "Stage 1/7", nav_timeout=timeout)
+    log("Stage 3/5 — Opening Facebook Marketplace", {"url": "https://www.facebook.com/marketplace/"})
+    await _safe_goto(page, "https://www.facebook.com/marketplace/", log, "Stage 3/5", nav_timeout=timeout)
     try:
         await page.wait_for_load_state("domcontentloaded", timeout=min(15000, timeout))
     except Exception:
@@ -296,24 +432,24 @@ async def stage_open_marketplace(
     await asyncio.sleep(1.0)
 
     if is_on_facebook_auth_flow(page):
-        log("Stage 1/7 — Facebook login/verification page — bot stays completely idle")
+        log("Stage 3/5 — Facebook login/verification page — bot stays completely idle")
         return
 
     if context and await is_login_fully_complete(context, page):
-        log("Stage 1/7 — Marketplace loaded (logged in)", {"url": clean_fb_url(page.url)})
+        log("Stage 3/5 — Marketplace loaded (logged in)", {"url": clean_fb_url(page.url)})
     else:
         dismissed = await dismiss_login_popup_once(page)
         if dismissed:
             log(
-                "Stage 1/7 — Login popup closed — log in using Email/Password in the top header (not the popup)",
+                "Stage 3/5 — Login popup closed — log in using Email/Password in the top header (not the popup)",
             )
         else:
             log(
-                "Stage 1/7 — Not logged in — log in using Email/Password in the top header",
+                "Stage 3/5 — Not logged in — log in using Email/Password in the top header",
                 {"url": page.url},
             )
         log(
-            "Stage 1/7 — Bot idle on Marketplace (login reminder email after 5 minutes)",
+            "Stage 3/5 — Bot idle on Marketplace (login reminder email after 5 minutes)",
         )
 
 
@@ -321,11 +457,11 @@ async def stage_ensure_login(page: Page, context: BrowserContext, cfg: Settings,
     from app.services.facebook_errors import FacebookLoginRequiredError, LOGIN_REQUIRED_LOG
     from app.services.login_reminder_service import send_facebook_logout_alert
 
-    log("Stage 2/7 — Checking Facebook login")
+    log("Stage 2/5 — Checking Facebook login")
     restore_session_file_from_db(cfg)
 
     if await is_login_fully_complete(context, page):
-        log("Stage 2/7 — Logged in (saved session)")
+        log("Stage 2/5 — Logged in (saved session)")
         await save_session(context, cfg)
         return True
 
@@ -333,34 +469,34 @@ async def stage_ensure_login(page: Page, context: BrowserContext, cfg: Settings,
     on_server = is_cloud_host()
 
     if headless and on_server:
-        log(f"Stage 2/7 — {LOGIN_REQUIRED_LOG}", level=LogLevel.WARNING)
+        log(f"Stage 2/5 — {LOGIN_REQUIRED_LOG}", level=LogLevel.WARNING)
         await send_facebook_logout_alert()
         raise FacebookLoginRequiredError(LOGIN_REQUIRED_LOG)
 
     if is_on_facebook_auth_flow(page):
-        log("Stage 2/7 — Complete Facebook login/verification in browser — bot is completely idle")
+        log("Stage 2/5 — Complete Facebook login/verification in browser — bot is completely idle")
     else:
         if "marketplace" in page.url.lower():
             if await dismiss_login_popup_once(page):
-                log("Stage 2/7 — Login popup closed — use top header Email/Password to log in")
+                log("Stage 2/5 — Login popup closed — use top header Email/Password to log in")
         log(
-            "Stage 2/7 — Not logged in — log in in the Chromium window (reminder email after 5 minutes)",
+            "Stage 2/5 — Not logged in — log in in the Chromium window (reminder email after 5 minutes)",
             {"url": page.url},
         )
 
     if await wait_passive_for_login(context, page, timeout_seconds=MANUAL_LOGIN_WAIT_SECONDS):
-        log("Stage 2/7 — Login and verification complete — opening Marketplace")
+        log("Stage 2/5 — Login and verification complete — opening Marketplace")
         await asyncio.sleep(POST_LOGIN_SETTLE_SECONDS)
         if not is_on_facebook_auth_flow(page):
             await reload_marketplace_after_login(page, cfg)
         if not await _is_marketplace_ready(page, context):
-            log("Stage 2/7 — Marketplace not ready after login", level=LogLevel.ERROR)
+            log("Stage 2/5 — Marketplace not ready after login", level=LogLevel.ERROR)
             return False
         await save_session(context, cfg)
-        log("Stage 2/7 — Login complete — Marketplace ready")
+        log("Stage 2/5 — Login complete — Marketplace ready")
         return True
 
-    log("Stage 2/7 — Login timed out", level=LogLevel.ERROR)
+    log("Stage 2/5 — Login timed out", level=LogLevel.ERROR)
     return False
 
 
@@ -538,16 +674,22 @@ async def filters_match_on_page(
     location: MarketplaceLocation,
     min_price: float | None,
     max_price: float | None,
-) -> tuple[bool, bool, dict | None]:
-    """Return (location_ok, price_ok, sidebar_location). Reads sidebar — no dialog clicks."""
+) -> tuple[bool, bool, dict | None, dict]:
+    """Return (location_ok, price_ok, sidebar_location, price_state). Reads sidebar — no clicks."""
     sidebar_loc = await _read_sidebar_location(page)
     if not sidebar_loc:
         await asyncio.sleep(0.4)
         sidebar_loc = await _read_sidebar_location(page)
     location_ok = bool(sidebar_loc and _location_already_matches(sidebar_loc, location))
+
     price_state = await _read_price_filter_state(page)
     price_ok = _price_already_matches(price_state, min_price, max_price)
-    return location_ok, price_ok, sidebar_loc
+    if not price_ok:
+        await asyncio.sleep(0.5)
+        price_state = await _read_price_filter_state(page)
+        price_ok = _price_already_matches(price_state, min_price, max_price)
+
+    return location_ok, price_ok, sidebar_loc, price_state
 
 
 async def _sidebar_filters_visible(page: Page) -> bool:
@@ -586,17 +728,17 @@ async def _wait_vehicles_filters_ready(
     loc_coords = await _find_location_row_coords(page)
     if loc_coords and not require_location:
         log(
-            "Stage 3/7 — Vehicles sidebar ready (location already visible)",
+            "Stage 4/5 — Vehicles sidebar ready (location already visible)",
             {"location": loc_coords["text"]},
         )
         return True
 
     if await _sidebar_filters_visible(page) and not require_location:
-        log("Stage 3/7 — Vehicles filters sidebar ready")
+        log("Stage 4/5 — Vehicles filters sidebar ready")
         return True
 
     log(
-        "Stage 3/7 — Waiting for Vehicles filters sidebar",
+        "Stage 4/5 — Waiting for Vehicles filters sidebar",
         {"timeout_ms": timeout_ms, "require_location": require_location},
     )
     try:
@@ -629,10 +771,10 @@ async def _wait_vehicles_filters_ready(
         return True
     except Exception:
         if await _sidebar_filters_visible(page):
-            log("Stage 3/7 — Vehicles filters sidebar ready (slow load)")
+            log("Stage 4/5 — Vehicles filters sidebar ready (slow load)")
             return True
         log(
-            "Stage 3/7 — Filters sidebar slow to load — continuing anyway",
+            "Stage 4/5 — Filters sidebar slow to load — continuing anyway",
             level=LogLevel.WARNING,
         )
         return False
@@ -781,21 +923,21 @@ async def _wait_for_sidebar_location_row(page: Page, log: LogFn) -> None:
     await _wait_vehicles_filters_ready(page, log)
     coords = await _find_location_row_coords(page)
     if coords:
-        log("Stage 4/7 — Location row detected", {"text": coords["text"]})
+        log("Stage 4/5 — Location row detected", {"text": coords["text"]})
     else:
-        log("Stage 4/7 — Location row not found in DOM yet", level=LogLevel.WARNING)
+        log("Stage 4/5 — Location row not found in DOM yet", level=LogLevel.WARNING)
 
 
 async def _click_sidebar_location_row(page: Page, log: LogFn) -> bool:
     """Click span[dir=auto] under Filters — opens Change location dialog."""
-    log("Stage 4/7 — Opening location dialog from Filters sidebar")
+    log("Stage 4/5 — Opening location dialog from Filters sidebar")
 
     for attempt in range(5):
         await _scroll_sidebar_filters(page)
         coords = await _find_location_row_coords(page)
         if coords:
             log(
-                "Stage 4/7 — Mouse click on location row",
+                "Stage 4/5 — Mouse click on location row",
                 {"text": coords["text"], "attempt": attempt + 1},
             )
             await page.mouse.click(coords["x"], coords["y"])
@@ -810,7 +952,7 @@ async def _click_sidebar_location_row(page: Page, log: LogFn) -> bool:
             await row.click(force=True, timeout=3000)
             await asyncio.sleep(0.55)
             if await _wait_location_dialog(page, timeout_ms=8000):
-                log("Stage 4/7 — Location dialog opened (Playwright click)")
+                log("Stage 4/5 — Location dialog opened (Playwright click)")
                 return True
         except Exception:
             pass
@@ -836,19 +978,19 @@ async def _open_location_dialog(page: Page, log: LogFn):
             if dialog:
                 return dialog
         log(
-            "Stage 4/7 — Location dialog not open yet, retry sidebar click",
+            "Stage 4/5 — Location dialog not open yet, retry sidebar click",
             {"try": try_num + 2},
             level=LogLevel.WARNING,
         )
         await _scroll_sidebar_filters(page)
         await asyncio.sleep(0.8)
-    log("Stage 4/7 — Could not open Change location dialog", level=LogLevel.ERROR)
+    log("Stage 4/5 — Could not open Change location dialog", level=LogLevel.ERROR)
     return None
 
 
 async def _pick_first_location_suggestion(page: Page, dialog, log: LogFn) -> None:
     """After typing location: wait for list, pick first suggestion, else keyboard."""
-    log("Stage 4/7 — Selecting first location suggestion (top of list)")
+    log("Stage 4/5 — Selecting first location suggestion (top of list)")
     deadline = time.time() + 12
     while time.time() < deadline:
         for selector in (
@@ -865,7 +1007,7 @@ async def _pick_first_location_suggestion(page: Page, dialog, log: LogFn) -> Non
                 if await first.is_visible(timeout=400):
                     text = re.sub(r"\s+", " ", (await first.inner_text())).strip()
                     await first.click()
-                    log("Stage 4/7 — First suggestion selected", {"text": text})
+                    log("Stage 4/5 — First suggestion selected", {"text": text})
                     await asyncio.sleep(0.35)
                     return
             except Exception:
@@ -875,7 +1017,7 @@ async def _pick_first_location_suggestion(page: Page, dialog, log: LogFn) -> Non
     await page.keyboard.press("ArrowDown")
     await asyncio.sleep(0.15)
     await page.keyboard.press("Enter")
-    log("Stage 4/7 — First suggestion selected via keyboard")
+    log("Stage 4/5 — First suggestion selected via keyboard")
     await asyncio.sleep(0.35)
 
 
@@ -921,7 +1063,7 @@ async def _select_radius_in_dialog(page: Page, dialog, radius_km: int, log: LogF
     await asyncio.sleep(0.35)
 
     if log:
-        log("Stage 4/7 — Radius typed in field (from filter)", {"radius_km": radius_km, "typed": radius_str})
+        log("Stage 4/5 — Radius typed in field (from filter)", {"radius_km": radius_km, "typed": radius_str})
 
 
 async def _scroll_location_dialog(dialog, page: Page) -> None:
@@ -976,7 +1118,7 @@ async def _scroll_location_dialog(dialog, page: Page) -> None:
 
 
 async def _click_apply_in_dialog(dialog, page: Page, log: LogFn) -> bool:
-    log("Stage 4/7 — Scrolling location form and clicking Apply")
+    log("Stage 4/5 — Scrolling location form and clicking Apply")
 
     apply_locators = [
         dialog.get_by_role("button", name=re.compile(r"^apply$", re.I)),
@@ -995,11 +1137,11 @@ async def _click_apply_in_dialog(dialog, page: Page, log: LogFn) -> bool:
                 await btn.wait_for(state="visible", timeout=3000)
                 await btn.scroll_into_view_if_needed(timeout=5000)
                 await btn.click(force=True, timeout=5000)
-                log("Stage 4/7 — Apply button clicked", {"attempt": attempt + 1})
+                log("Stage 4/5 — Apply button clicked", {"attempt": attempt + 1})
                 await asyncio.sleep(STEP_PAUSE)
                 try:
                     await dialog.wait_for(state="hidden", timeout=8000)
-                    log("Stage 4/7 — Location dialog closed after Apply")
+                    log("Stage 4/5 — Location dialog closed after Apply")
                     return True
                 except Exception:
                     pass
@@ -1038,11 +1180,11 @@ async def _click_apply_in_dialog(dialog, page: Page, log: LogFn) -> bool:
             """
         )
         if js_clicked:
-            log("Stage 4/7 — Apply clicked (JS)", {"attempt": attempt + 1})
+            log("Stage 4/5 — Apply clicked (JS)", {"attempt": attempt + 1})
             await asyncio.sleep(STEP_PAUSE)
             try:
                 await dialog.wait_for(state="hidden", timeout=8000)
-                log("Stage 4/7 — Location dialog closed after Apply")
+                log("Stage 4/5 — Location dialog closed after Apply")
                 return True
             except Exception:
                 pass
@@ -1067,12 +1209,12 @@ async def _click_apply_in_dialog(dialog, page: Page, log: LogFn) -> bool:
             """
         )
         if coords:
-            log("Stage 4/7 — Apply clicked (mouse)", {"attempt": attempt + 1})
+            log("Stage 4/5 — Apply clicked (mouse)", {"attempt": attempt + 1})
             await page.mouse.click(coords["x"], coords["y"])
             await asyncio.sleep(STEP_PAUSE)
             try:
                 await dialog.wait_for(state="hidden", timeout=8000)
-                log("Stage 4/7 — Location dialog closed after Apply")
+                log("Stage 4/5 — Location dialog closed after Apply")
                 return True
             except Exception:
                 pass
@@ -1081,12 +1223,12 @@ async def _click_apply_in_dialog(dialog, page: Page, log: LogFn) -> bool:
 
     try:
         if await dialog.is_visible(timeout=800):
-            log("Stage 4/7 — Apply button failed — dialog still open", level=LogLevel.ERROR)
+            log("Stage 4/5 — Apply button failed — dialog still open", level=LogLevel.ERROR)
             return False
     except Exception:
         return True
 
-    log("Stage 4/7 — Apply via keyboard Enter (fallback)")
+    log("Stage 4/5 — Apply via keyboard Enter (fallback)")
     await page.keyboard.press("Tab")
     await asyncio.sleep(0.2)
     await page.keyboard.press("Enter")
@@ -1130,26 +1272,26 @@ async def _wait_location_input_in_dialog(dialog, page: Page, log: LogFn):
 async def stage_set_location(page: Page, location: MarketplaceLocation, log: LogFn) -> bool:
     """On /vehicles: set location FIRST (before price). Change only if filter differs."""
     log(
-        "Stage 4/7 — LOCATION FIRST on Vehicles page",
+        "Stage 4/5 — LOCATION FIRST on Vehicles page",
         {"location": location.label, "radius_km": location.radius_km},
     )
 
     current = await _read_sidebar_location_with_retries(page)
     if current and _location_already_matches(current, location):
         log(
-            "Stage 4/7 — Location already correct on Facebook, skipping change",
+            "Stage 4/5 — Location already correct on Facebook, skipping change",
             {"current": current["raw"], "wanted": location.label, "radius_km": location.radius_km},
         )
         return True
 
     if current:
         log(
-            "Stage 4/7 — Location differs — opening change dialog",
+            "Stage 4/5 — Location differs — opening change dialog",
             {"current": current["raw"], "wanted": location.label},
         )
     else:
         log(
-            "Stage 4/7 — Could not read current location text — opening change dialog anyway",
+            "Stage 4/5 — Could not read current location text — opening change dialog anyway",
             {"wanted": location.label},
             level=LogLevel.WARNING,
         )
@@ -1159,19 +1301,19 @@ async def stage_set_location(page: Page, location: MarketplaceLocation, log: Log
         current = await _read_sidebar_location_with_retries(page, attempts=3)
         if current and _location_already_matches(current, location):
             log(
-                "Stage 4/7 — Location already correct (dialog skipped)",
+                "Stage 4/5 — Location already correct (dialog skipped)",
                 {"current": current["raw"], "wanted": location.label},
             )
             return True
         log(
-            "Stage 4/7 — Could not open location dialog — continuing with current page filters",
+            "Stage 4/5 — Could not open location dialog — continuing with current page filters",
             {"wanted": location.label},
             level=LogLevel.WARNING,
         )
         return False
 
     try:
-        log("Stage 4/7 — Typing location in dialog", {"location": location.label})
+        log("Stage 4/5 — Typing location in dialog", {"location": location.label})
         location_input = await _wait_location_input_in_dialog(dialog, page, log)
         await location_input.click()
         await location_input.fill("")
@@ -1181,7 +1323,7 @@ async def stage_set_location(page: Page, location: MarketplaceLocation, log: Log
         await _pick_first_location_suggestion(page, dialog, log)
         await asyncio.sleep(0.6)
 
-        log("Stage 4/7 — Selecting radius", {"radius_km": location.radius_km})
+        log("Stage 4/5 — Selecting radius", {"radius_km": location.radius_km})
         await _select_radius_in_dialog(page, dialog, location.radius_km, log)
         await _normalize_location_panel(page, dialog)
         await asyncio.sleep(0.35)
@@ -1205,18 +1347,18 @@ async def stage_set_location(page: Page, location: MarketplaceLocation, log: Log
                 break
             await asyncio.sleep(0.6)
         if updated and _location_already_matches(updated, location):
-            log("Stage 4/7 — Location applied on Vehicles page (Apply confirmed)", {"location": location.label})
+            log("Stage 4/5 — Location applied on Vehicles page (Apply confirmed)", {"location": location.label})
             return True
 
         log(
-            "Stage 4/7 — Apply clicked but sidebar not updated yet",
+            "Stage 4/5 — Apply clicked but sidebar not updated yet",
             {"wanted": location.label},
             level=LogLevel.WARNING,
         )
-        log("Stage 4/7 — Location applied on Vehicles page", {"location": location.label})
+        log("Stage 4/5 — Location applied on Vehicles page", {"location": location.label})
         return True
     except Exception as exc:
-        log("Stage 4/7 — Failed to set location", {"error": str(exc)}, level=LogLevel.ERROR)
+        log("Stage 4/5 — Failed to set location", {"error": str(exc)}, level=LogLevel.ERROR)
         raise
 
 
@@ -1226,20 +1368,28 @@ async def wait_then_open_vehicles(
     *,
     nav_timeout: int = 60000,
     location: MarketplaceLocation | None = None,
+    min_price: float | None = None,
+    max_price: float | None = None,
     refresh: bool = True,
     context: BrowserContext | None = None,
 ) -> None:
     """Logged-in Marketplace → wait full load → immediately /category/vehicles."""
     if _is_on_vehicles_page(page):
-        log("Stage 3/7 — Already on Vehicles page", {"url": clean_fb_url(page.url)})
+        log("Stage 4/5 — Already on Vehicles page", {"url": clean_fb_url(page.url)})
         await stage_open_vehicles_category(
-            page, log, nav_timeout=nav_timeout, location=location, refresh=refresh
+            page,
+            log,
+            nav_timeout=nav_timeout,
+            location=location,
+            min_price=min_price,
+            max_price=max_price,
+            refresh=refresh,
         )
         return
 
     t0 = time.monotonic()
-    log("Stage 2/7 — Waiting for Marketplace to fully load", {"url": clean_fb_url(page.url)})
-    await _wait_marketplace_ready(page, log, "Stage 2/7", context=context, timeout_sec=45)
+    log("Stage 4/5 — Waiting for Marketplace before Vehicles", {"url": clean_fb_url(page.url)})
+    await _wait_marketplace_ready(page, log, "Stage 4/5", context=context, timeout_sec=45)
     try:
         await page.wait_for_load_state("domcontentloaded", timeout=15000)
     except Exception:
@@ -1250,17 +1400,23 @@ async def wait_then_open_vehicles(
         pass
     load_sec = round(time.monotonic() - t0, 2)
     log(
-        "Stage 2/7 — Marketplace fully loaded — opening Vehicles now",
+        "Stage 4/5 — Opening Vehicles (Zurich + price filter URL)",
         {"marketplace_url": clean_fb_url(page.url), "load_seconds": load_sec},
     )
 
     t_nav = time.monotonic()
     await stage_open_vehicles_category(
-        page, log, nav_timeout=nav_timeout, location=location, refresh=refresh
+        page,
+        log,
+        nav_timeout=nav_timeout,
+        location=location,
+        min_price=min_price,
+        max_price=max_price,
+        refresh=refresh,
     )
     nav_elapsed = round(time.monotonic() - t_nav, 2)
     log(
-        "Stage 3/7 — Vehicles navigation complete",
+        "Stage 4/5 — Vehicles navigation complete",
         {
             "url": clean_fb_url(page.url),
             "navigation_seconds": nav_elapsed,
@@ -1276,12 +1432,29 @@ async def stage_open_vehicles_category(
     nav_timeout: int = 60000,
     prepare_location: bool = True,
     location: MarketplaceLocation | None = None,
+    min_price: float | None = None,
+    max_price: float | None = None,
     refresh: bool = True,
 ) -> None:
     """After Marketplace wait → /category/vehicles → optional refresh → ready for location + price."""
     first_open = not _is_on_vehicles_page(page)
     if first_open:
-        await _open_vehicles_page(page, log, nav_timeout=nav_timeout, location=location)
+        await _open_vehicles_page(
+            page,
+            log,
+            nav_timeout=nav_timeout,
+            location=location,
+            min_price=min_price,
+            max_price=max_price,
+        )
+    elif min_price or max_price:
+        target_url = vehicles_category_url(min_price=min_price, max_price=max_price)
+        current = clean_fb_url(page.url).split("?")[0]
+        target_base = clean_fb_url(target_url).split("?")[0]
+        if current == target_base and target_url not in page.url:
+            log("Stage 4/5 — Opening Vehicles with price filter in URL", {"url": target_url})
+            await _safe_goto(page, target_url, log, "Stage 4/5", nav_timeout=nav_timeout)
+            await asyncio.sleep(0.5)
 
     try:
         await page.wait_for_load_state("domcontentloaded", timeout=8000)
@@ -1289,7 +1462,7 @@ async def stage_open_vehicles_category(
         pass
 
     if refresh:
-        log("Stage 3/7 — Refresh Vehicles page")
+        log("Stage 4/5 — Refresh Vehicles page")
         await page.reload(wait_until="commit", timeout=min(15000, nav_timeout))
         try:
             await page.wait_for_load_state("domcontentloaded", timeout=8000)
@@ -1297,13 +1470,13 @@ async def stage_open_vehicles_category(
             pass
         await asyncio.sleep(0.5)
     elif first_open:
-        log("Stage 3/7 — First Vehicles open — skipping refresh for speed")
+        log("Stage 4/5 — First Vehicles open — skipping refresh for speed")
         await asyncio.sleep(0.5)
 
     await _wait_vehicles_filters_ready(
         page, log, timeout_ms=4000, require_location=False
     )
-    log("Stage 3/7 — Vehicles page ready", {"url": clean_fb_url(page.url)})
+    log("Stage 4/5 — Vehicles page ready", {"url": clean_fb_url(page.url)})
 
 
 async def _find_price_inputs(page: Page):
@@ -1434,19 +1607,15 @@ async def stage_apply_vehicle_price(
     log: LogFn,
 ) -> bool:
     if (min_price is None or min_price <= 0) and (max_price is None or max_price <= 0):
-        log("Stage 5/7 — No price range set, skipping price filter")
+        log("Stage 4/5 — No price range set, skipping price filter")
         return False
 
-    log(
-        "Stage 5/7 — Applying Min/Max price on Vehicles page",
-        {"min_price": min_price, "max_price": max_price},
-    )
-    await _require_scrape_page_ready(page, log, "Stage 5/7")
+    await _require_scrape_page_ready(page, log, "Stage 4/5")
 
     current_state = await _read_price_filter_state(page)
     if _price_already_matches(current_state, min_price, max_price):
         log(
-            "Stage 5/7 — Price already correct on Facebook, skipping change",
+            "Stage 4/5 — Price already correct on Facebook, skipping change",
             {
                 "wanted_min": int(min_price) if min_price and min_price > 0 else None,
                 "wanted_max": int(max_price) if max_price and max_price > 0 else None,
@@ -1455,9 +1624,19 @@ async def stage_apply_vehicle_price(
         )
         return True
 
+    log(
+        "Stage 4/5 — Applying Min/Max price on Vehicles page",
+        {
+            "min_price": min_price,
+            "max_price": max_price,
+            "current_min": current_state.get("input_min_value"),
+            "current_max": current_state.get("input_max_value"),
+        },
+    )
+
     min_input, max_input = await _find_price_inputs(page)
     if not min_input or not max_input:
-        log("Stage 5/7 — Price inputs not found (login popup may be blocking page)", level=LogLevel.ERROR)
+        log("Stage 4/5 — Price inputs not found (login popup may be blocking page)", level=LogLevel.ERROR)
         raise RuntimeError("Could not find Min/Max price fields on Vehicles page")
 
     try:
@@ -1465,7 +1644,7 @@ async def stage_apply_vehicle_price(
             await _fill_price_input(min_input, int(min_price))
             state_after_min = await _read_price_filter_state(page)
             log(
-                "Stage 5/7 — Min price entered",
+                "Stage 4/5 — Min price entered",
                 {
                     "wanted_min": int(min_price),
                     "input_min": state_after_min.get("input_min"),
@@ -1477,7 +1656,7 @@ async def stage_apply_vehicle_price(
             await _fill_price_input(max_input, int(max_price))
             state_after_max = await _read_price_filter_state(page)
             log(
-                "Stage 5/7 — Max price entered",
+                "Stage 4/5 — Max price entered",
                 {
                     "wanted_max": int(max_price),
                     "input_max": state_after_max.get("input_max"),
@@ -1488,7 +1667,7 @@ async def stage_apply_vehicle_price(
         await asyncio.sleep(2)
         final_state = await _read_price_filter_state(page)
         log(
-            "Stage 5/7 — Price range applied",
+            "Stage 4/5 — Price range applied",
             {
                 "wanted_min": int(min_price) if min_price and min_price > 0 else None,
                 "wanted_max": int(max_price) if max_price and max_price > 0 else None,
@@ -1497,7 +1676,90 @@ async def stage_apply_vehicle_price(
         )
         return True
     except Exception as exc:
-        log("Stage 5/7 — Could not apply price", {"error": str(exc)}, level=LogLevel.ERROR)
+        log("Stage 4/5 — Could not apply price", {"error": str(exc)}, level=LogLevel.ERROR)
+        raise
+
+
+async def prepare_vehicles_monitoring_page(
+    page: Page,
+    log: LogFn,
+    location: MarketplaceLocation,
+    min_price: float | None,
+    max_price: float | None,
+    *,
+    nav_timeout: int = 60000,
+    context: BrowserContext | None = None,
+) -> None:
+    """
+    Stage 4/5 — Open Vehicles with filter price in URL.
+    Skip Zurich location + price UI when sidebar/URL already matches the filter.
+    """
+    await wait_then_open_vehicles(
+        page,
+        log,
+        nav_timeout=nav_timeout,
+        location=location,
+        min_price=min_price,
+        max_price=max_price,
+        refresh=False,
+        context=context,
+    )
+
+    location_ok, price_ok, sidebar_loc, price_state = await filters_match_on_page(
+        page, location, min_price, max_price
+    )
+
+    if location_ok and price_ok:
+        log(
+            "Stage 4/5 — Vehicles ready — Zurich + price filter applied (skipped)",
+            {
+                "location": sidebar_loc["raw"] if sidebar_loc else location.label,
+                "min_price": price_state.get("input_min_value"),
+                "max_price": price_state.get("input_max_value"),
+                "url": page.url,
+            },
+        )
+        return
+
+    if location_ok:
+        log(
+            "Stage 4/5 — Zurich location OK — skipped",
+            {"current": sidebar_loc["raw"] if sidebar_loc else location.label},
+        )
+    else:
+        log("Stage 4/5 — Setting Zurich location (once)", {"wanted": location.label})
+        if not await stage_set_location(page, location, log):
+            log(
+                "Stage 4/5 — Keeping current Vehicles page location",
+                {"wanted": location.label},
+                level=LogLevel.WARNING,
+            )
+
+    if price_ok:
+        log(
+            "Stage 4/5 — Price filter OK — skipped",
+            {
+                "wanted_min": int(min_price) if min_price and min_price > 0 else None,
+                "wanted_max": int(max_price) if max_price and max_price > 0 else None,
+                "sidebar_min": price_state.get("input_min_value"),
+                "sidebar_max": price_state.get("input_max_value"),
+            },
+        )
+        return
+
+    try:
+        await stage_apply_vehicle_price(page, min_price, max_price, log)
+    except RuntimeError as exc:
+        _, price_ok_after, _, price_state_after = await filters_match_on_page(
+            page, location, min_price, max_price
+        )
+        if price_ok_after:
+            log(
+                "Stage 4/5 — Price verified on Vehicles page",
+                {"error": str(exc), **price_state_after},
+                level=LogLevel.WARNING,
+            )
+            return
         raise
 
 
@@ -1544,7 +1806,7 @@ async def stage_enrich_listing_details(
         return items
 
     log(
-        "Stage 6b/7 — Opening detail pages for main-page hints only",
+        "Stage 5/5 — Opening detail pages for main-page hints only",
         {"count": len(items)},
     )
     for idx, item in enumerate(items, 1):
@@ -1566,7 +1828,7 @@ async def stage_enrich_listing_details(
                 await asyncio.sleep(0.8)
         except Exception as exc:
             log(
-                f"Stage 6b/7 — Could not read listing {idx}/{len(items)}",
+                f"Stage 5/5 — Could not read listing {idx}/{len(items)}",
                 {"url": url, "error": str(exc)},
                 level=LogLevel.WARNING,
             )
@@ -1577,7 +1839,7 @@ async def stage_enrich_listing_details(
             await asyncio.sleep(1)
         except Exception as exc:
             log(
-                "Stage 6b/7 — Could not return to vehicles list after detail checks",
+                "Stage 5/5 — Could not return to vehicles list after detail checks",
                 {"url": return_url, "error": str(exc)},
                 level=LogLevel.WARNING,
             )
@@ -1586,7 +1848,7 @@ async def stage_enrich_listing_details(
 
 async def stage_refresh_listings_page(page: Page, log: LogFn, *, nav_timeout: int = 120000) -> None:
     """Soft refresh on the same filtered Vehicles URL — keeps min/max price in URL."""
-    log("Stage 6/7 — Refreshing listings page for new results", {"url": page.url})
+    log("Stage 5/5 — Refreshing listings page for new results", {"url": page.url})
     await page.reload(wait_until="domcontentloaded", timeout=nav_timeout)
     await asyncio.sleep(2)
     await page.evaluate("window.scrollTo(0, 0)")
@@ -1601,10 +1863,10 @@ async def stage_scrape_listings(
     scroll_passes: int = 3,
 ) -> list[dict]:
     log(
-        "Stage 6/7 — Reading listings from Vehicles page (only filter-matched ones are saved)",
+        "Stage 5/5 — Reading listings from Vehicles page (only filter-matched ones are saved)",
         {"max_read": max_results},
     )
-    await _require_scrape_page_ready(page, log, "Stage 6/7")
+    await _require_scrape_page_ready(page, log, "Stage 5/5")
     passes = max(1, scroll_passes)
     for _ in range(passes):
         await page.evaluate("window.scrollBy(0, window.innerHeight)")
@@ -1718,5 +1980,5 @@ async def stage_scrape_listings(
             return results;
         }
     """)
-    log("Stage 6/7 — Listings read from main page", {"count": len(items[:max_results])})
+    log("Stage 5/5 — Listings read from main page", {"count": len(items[:max_results])})
     return items[:max_results]

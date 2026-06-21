@@ -25,15 +25,14 @@ from app.services.facebook_flow import (
     _create_context,
     _is_on_vehicles_page,
     _make_db_logger,
+    clean_fb_url,
     filters_match_on_page,
-    stage_apply_vehicle_price,
+    prepare_vehicles_monitoring_page,
     stage_enrich_listing_details,
     stage_ensure_login,
     stage_open_marketplace,
     stage_refresh_listings_page,
     stage_scrape_listings,
-    stage_set_location,
-    wait_then_open_vehicles,
 )
 from app.services.matching_engine import (
     FilterCriteria,
@@ -138,6 +137,16 @@ class FacebookMarketplaceSource(BaseMarketplaceSource):
             return False
         return True
 
+    def _mark_session_filters(
+        self,
+        page: Page,
+        location: MarketplaceLocation,
+        scrape_params: FilterScrapeParams,
+    ) -> None:
+        self._session_location_key = self._location_key(location)
+        self._session_price_key = self._price_key(scrape_params)
+        self._session_vehicles_url = page.url
+
     async def _apply_listings_pass(
         self,
         page: Page,
@@ -162,7 +171,7 @@ class FacebookMarketplaceSource(BaseMarketplaceSource):
                 if listing_has_filter_hint(item_dict_hint_text(item), criteria)
             ]
             log(
-                "Stage 6b/7 — Main page brand/model hints (detail page only for these)",
+                "Stage 5/5 — Detail check for brand/model hints",
                 {
                     "on_page": on_page,
                     "hints": len(hint_items),
@@ -177,14 +186,14 @@ class FacebookMarketplaceSource(BaseMarketplaceSource):
             items = hint_items
         else:
             log(
-                "Stage 6/7 — Main page only (set brand/model in filter to open detail pages)",
+                "Stage 5/5 — Scanning listings (filter-matched only)",
                 {"on_page": on_page},
             )
             items = grid_items
 
         listings = [_item_to_listing(item) for item in items]
         log(
-            "Stage 7/7 — Listings check complete",
+            "Stage 5/5 — Monitoring complete",
             {"listings_on_page": on_page, "checked_in_detail": len(listings)},
         )
         return listings
@@ -290,9 +299,9 @@ class FacebookMarketplaceSource(BaseMarketplaceSource):
     ) -> tuple[Playwright, Browser | None, BrowserContext, Page]:
         playwright = await asyncio.wait_for(async_playwright().start(), timeout=60)
         if headless:
-            log("Stage 0/7 — Opening Chromium (headless — Stages 1–7)", {"headless": True})
+            log("Stage 1/5 — Opening Chromium (headless)", {"headless": True})
         else:
-            log("Stage 0/7 — Opening Chromium window (visible — Stages 1–7)", {"headless": False})
+            log("Stage 1/5 — Opening Chromium window", {"headless": False})
         context, page, browser = await launch_facebook_context(playwright, cfg, headless=headless)
         return playwright, browser, context, page
 
@@ -312,6 +321,25 @@ class FacebookMarketplaceSource(BaseMarketplaceSource):
             await stage_open_marketplace(
                 page, cfg, log, context=context, nav_timeout=nav_timeout
             )
+
+    async def _ensure_marketplace_ready(
+        self,
+        page: Page,
+        context: BrowserContext,
+        cfg,
+        log,
+        *,
+        nav_timeout: int,
+    ) -> None:
+        """Stage 3/5 — Facebook Marketplace home before Vehicles."""
+        if is_on_facebook_auth_flow(page):
+            return
+        if needs_marketplace_navigation(page):
+            await stage_open_marketplace(
+                page, cfg, log, context=context, nav_timeout=nav_timeout
+            )
+        else:
+            log("Stage 3/5 — Marketplace ready", {"url": clean_fb_url(page.url)})
 
     async def open_marketplace_browser(self) -> None:
         """Launch Chromium, open Marketplace, wait for manual login + 2FA if needed."""
@@ -363,12 +391,12 @@ class FacebookMarketplaceSource(BaseMarketplaceSource):
     ) -> tuple[Playwright, Browser | None, BrowserContext, Page, bool]:
         if self.has_live_browser():
             assert self._playwright and self._context and self._page
-            log("Stage 0/7 — Reusing open browser window")
+            log("Stage 1/5 — Reusing open browser")
             return self._playwright, self._browser, self._context, self._page, False
 
-        log("Stage 0/7 — Opening browser", {"headless": headless})
+        log("Stage 1/5 — Opening browser", {"headless": headless})
         playwright, browser, context, page = await self._launch_browser(cfg, headless, log)
-        log("Stage 0/7 — Browser ready")
+        log("Stage 1/5 — Browser ready")
         self._store_session(playwright, browser, context, page)
         return playwright, browser, context, page, True
 
@@ -402,20 +430,18 @@ class FacebookMarketplaceSource(BaseMarketplaceSource):
             page.set_default_navigation_timeout(nav_timeout)
             page.set_default_timeout(nav_timeout)
 
-            await self._goto_marketplace_if_needed(
-                page, context, cfg, log, nav_timeout=nav_timeout
-            )
-
             if not await is_login_fully_complete(context, page):
                 if not await stage_ensure_login(page, context, cfg, log, db):
                     raise RuntimeError("Facebook login not completed — finish login in the browser window")
             else:
-                log("Stage 2/7 — Already logged in")
+                log("Stage 2/5 — Logged in")
+
+            await self._ensure_marketplace_ready(page, context, cfg, log, nav_timeout=nav_timeout)
 
             session_valid = self._is_filters_session_valid(page, location, scrape_params)
 
             if not session_valid and _is_on_vehicles_page(page):
-                location_ok, price_ok, sidebar_loc = await filters_match_on_page(
+                location_ok, price_ok, sidebar_loc, price_state = await filters_match_on_page(
                     page,
                     location,
                     scrape_params.price_min,
@@ -423,23 +449,23 @@ class FacebookMarketplaceSource(BaseMarketplaceSource):
                 )
                 if location_ok and price_ok:
                     log(
-                        "Filters already applied on Vehicles page — skipping setup",
+                        "Stage 4/5 — Vehicles ready — Zurich + price already applied",
                         {
                             "location": sidebar_loc["raw"] if sidebar_loc else location.label,
+                            "min_price": price_state.get("input_min_value"),
+                            "max_price": price_state.get("input_max_value"),
                             "url": page.url,
                         },
                     )
-                    self._session_location_key = self._location_key(location)
-                    self._session_price_key = self._price_key(scrape_params)
-                    self._session_vehicles_url = page.url
+                    self._mark_session_filters(page, location, scrape_params)
                     session_valid = True
 
             if session_valid:
-                refresh_url = self._session_vehicles_url or page.url
                 log(
-                    "Monitoring pass — filters already applied, refreshing listings page",
-                    {"url": refresh_url},
+                    "Stage 5/5 — Monitoring — refreshing listings",
+                    {"url": self._session_vehicles_url or page.url},
                 )
+                refresh_url = self._session_vehicles_url or page.url
                 if refresh_url and refresh_url != page.url:
                     await page.goto(refresh_url, wait_until="domcontentloaded", timeout=nav_timeout)
                     await asyncio.sleep(1.5)
@@ -454,62 +480,17 @@ class FacebookMarketplaceSource(BaseMarketplaceSource):
                     nav_timeout=nav_timeout,
                 )
             else:
-                log("First pass — applying location and price filters")
-                await wait_then_open_vehicles(
+                await prepare_vehicles_monitoring_page(
                     page,
                     log,
-                    nav_timeout=nav_timeout,
-                    location=location,
-                    refresh=False,
-                    context=context,
-                )
-
-                location_ok, price_ok, sidebar_loc = await filters_match_on_page(
-                    page,
                     location,
                     scrape_params.price_min,
                     scrape_params.price_max,
+                    nav_timeout=nav_timeout,
+                    context=context,
                 )
-
-                if location_ok:
-                    log(
-                        "Stage 4/7 — Location already set on Facebook, skipping change",
-                        {"current": sidebar_loc["raw"] if sidebar_loc else location.label},
-                    )
-                else:
-                    if not await stage_set_location(page, location, log):
-                        log(
-                            "Stage 4/7 — Location not changed — continuing with current Vehicles page",
-                            {"wanted": location.label},
-                            level=LogLevel.WARNING,
-                        )
-
-                if price_ok:
-                    log("Stage 5/7 — Price already set on Facebook, skipping change")
-                else:
-                    try:
-                        await stage_apply_vehicle_price(
-                            page, scrape_params.price_min, scrape_params.price_max, log
-                        )
-                    except RuntimeError as exc:
-                        _, price_ok_after, _ = await filters_match_on_page(
-                            page,
-                            location,
-                            scrape_params.price_min,
-                            scrape_params.price_max,
-                        )
-                        if price_ok_after:
-                            log(
-                                "Stage 5/7 — Price verified on page despite input issue",
-                                {"error": str(exc)},
-                                level=LogLevel.WARNING,
-                            )
-                        else:
-                            raise
-
-                self._session_location_key = self._location_key(location)
-                self._session_price_key = self._price_key(scrape_params)
-                self._session_vehicles_url = page.url
+                self._mark_session_filters(page, location, scrape_params)
+                log("Stage 5/5 — Monitoring — scanning listings", {"url": page.url})
                 listings = await self._apply_listings_pass(
                     page,
                     log,

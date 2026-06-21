@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Search, Download, FileText, Trash2 } from "lucide-react"
 import { getLogs, exportLogs, deleteLogs, deleteAllLogs } from "@/lib/api"
 import type { ActivityLog } from "@/types"
@@ -27,9 +27,12 @@ export default function LogsPage() {
   const [deleting, setDeleting] = useState(false)
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const { toast } = useToast()
+  const loadSeq = useRef(0)
 
-  const load = async () => {
-    setLoading(true)
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent ?? false
+    const seq = ++loadSeq.current
+    if (!silent) setLoading(true)
     try {
       const { data } = await getLogs({
         page, page_size: 50,
@@ -37,15 +40,26 @@ export default function LogsPage() {
         category: category || undefined,
         level: level || undefined,
       })
+      if (seq !== loadSeq.current) return
       setLogs(data.items)
       setTotal(data.total)
-      setSelected(new Set())
+      if (!silent) setSelected(new Set())
     } finally {
-      setLoading(false)
+      if (seq === loadSeq.current && !silent) setLoading(false)
     }
-  }
+  }, [page, category, level, search])
 
-  useEffect(() => { load() }, [page, category, level])
+  useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    const tick = () => {
+      if (document.visibilityState === "visible") {
+        load({ silent: true })
+      }
+    }
+    const interval = window.setInterval(tick, 5000)
+    return () => window.clearInterval(interval)
+  }, [load])
 
   const toggleOne = (id: number) => {
     setSelected((prev) => {

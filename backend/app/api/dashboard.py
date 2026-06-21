@@ -346,6 +346,12 @@ def delete_recipient(
     return {"message": "Recipient deleted"}
 
 
+@router.get("/notifications/email-status")
+def email_delivery_status(_: User = Depends(require_admin)):
+    """Which email provider is active — helps debug Render SMTP timeouts."""
+    return email_service.email_status()
+
+
 @router.post("/notifications/test-email")
 async def send_test_email(
     data: TestEmailRequest,

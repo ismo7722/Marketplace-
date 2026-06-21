@@ -1,12 +1,14 @@
-import aiosmtplib
 import asyncio
+import logging
+
+import aiosmtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from jinja2 import Template
 
-from app.config import get_settings
+from app.config import get_settings, is_cloud_host
 
-settings = get_settings()
+logger = logging.getLogger(__name__)
 
 LISTING_EMAIL_TEMPLATE = """
 <!DOCTYPE html>
@@ -101,6 +103,11 @@ DEMO_LISTING_EMAIL_DATA = {
     "is_demo": True,
 }
 
+PAID_RENDER_SMTP_HINT = (
+    "Gmail SMTP works on your PC (.env) but Render FREE blocks ports 587/465. "
+    "Upgrade to a PAID Render instance and set SMTP_USER + SMTP_PASSWORD in Render env."
+)
+
 
 class EmailService:
     def __init__(self):
@@ -118,6 +125,29 @@ class EmailService:
             "use_tls": (db_settings.get("smtp_use_tls", "true")).lower() == "true",
         }
 
+    def email_status(self) -> dict:
+        smtp = self._get_smtp_config()
+        on_render = is_cloud_host()
+        return {
+            "smtp_configured": bool(smtp["username"] and smtp["password"]),
+            "smtp_host": smtp["host"],
+            "smtp_port": smtp["port"],
+            "from_email": smtp["from_email"],
+            "on_render": on_render,
+            "message": PAID_RENDER_SMTP_HINT if on_render else "SMTP via Gmail — local .env or any host with open port 587.",
+        }
+
+    def _format_smtp_error(self, exc: Exception, config: dict) -> str:
+        msg = str(exc).strip() or exc.__class__.__name__
+        if not config.get("username") or not config.get("password"):
+            return "SMTP not configured — set SMTP_USER and SMTP_PASSWORD in environment variables."
+        lower = msg.lower()
+        if is_cloud_host() and any(
+            token in lower for token in ("timeout", "timed out", "connection refused", "network is unreachable")
+        ):
+            return PAID_RENDER_SMTP_HINT
+        return msg
+
     async def send_email(
         self,
         to_email: str,
@@ -127,7 +157,7 @@ class EmailService:
     ) -> tuple[bool, str]:
         config = self._get_smtp_config(smtp_config)
         if not config["username"] or not config["password"]:
-            return False, "SMTP not configured. Administrator must set SMTP_USER and SMTP_PASSWORD in backend .env file."
+            return False, "SMTP not configured. Set SMTP_USER and SMTP_PASSWORD in environment variables."
 
         message = MIMEMultipart("alternative")
         message["From"] = f"{config['from_name']} <{config['from_email']}>"
@@ -150,7 +180,8 @@ class EmailService:
             )
             return True, "Email sent successfully"
         except Exception as exc:
-            return False, str(exc)
+            logger.warning("SMTP send failed (%s:%s): %s", config["host"], config["port"], exc)
+            return False, self._format_smtp_error(exc, config)
 
     async def send_listing_notification(
         self,

@@ -42,7 +42,7 @@ async def main() -> int:
         status = get_facebook_session_status()
         if status.get("has_session"):
             print("\nSUCCESS — Facebook session saved.")
-            print("Dashboard: Stop → Start — all 7 stages will run headless on the server.")
+            print("Dashboard: Stop → Start — 5-step monitoring runs headless on the server.")
             return 0
         print("\nFAILED — session was not saved. Complete Facebook login and try again.")
         return 1

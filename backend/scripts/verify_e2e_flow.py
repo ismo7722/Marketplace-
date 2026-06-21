@@ -121,7 +121,7 @@ def main() -> int:
                 if field in details:
                     url_hits.append((msg, field, details))
 
-            if "Monitoring cycle complete" in msg or "Stage 7/7" in msg:
+            if "Monitoring cycle complete" in msg or "Stage 5/5" in msg:
                 step("Scan cycle finished")
                 break
         else:

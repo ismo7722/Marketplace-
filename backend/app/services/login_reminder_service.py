@@ -28,7 +28,7 @@ LOGOUT_ALERT_HTML = """
     <ol style="color:#333;line-height:1.6;">
       <li>Chromium opens — log in to Facebook (2FA ok)</li>
       <li>Session saves automatically</li>
-      <li>Dashboard → Stop → Start — all 7 stages run headless on the server</li>
+      <li>Dashboard → Stop → Start — 5-step monitoring runs headless on the server</li>
     </ol>
     <p style="color: #65676b; font-size: 12px; margin-top: 24px;">Facebook Marketplace Monitor</p>
   </div>
