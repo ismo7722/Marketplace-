@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     SMTP_USE_TLS: bool = True
 
     PLAYWRIGHT_TIMEOUT: int = 60000
-    # None = use dashboard Settings toggle. False = visible Chromium, True = headless
+    # None = always headless for monitoring. Set False only for local debugging.
     PLAYWRIGHT_HEADLESS: bool | None = None
 
     # Facebook session cookies (restored on each scan)

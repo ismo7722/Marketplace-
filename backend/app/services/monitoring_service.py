@@ -256,7 +256,7 @@ class MonitoringService:
         monitoring.is_scanning = True
         db.commit()
 
-        stats = {"processed": 0, "matched": 0, "notified": 0, "duplicates": 0, "errors": 0}
+        stats = {"processed": 0, "matched": 0, "notified": 0, "duplicates": 0, "errors": 0, "login_required": False}
         log_activity(db, LogCategory.MONITORING, "Bot ON — monitoring started", source="monitor")
         db.commit()
 
@@ -277,7 +277,7 @@ class MonitoringService:
                 pass
 
     async def _execute_scan(self, db: Session, monitoring: MonitoringSetting, force: bool, stats: dict) -> dict:
-        headless_mode = False
+        headless_mode = True
         db.commit()
         try:
             active_filters = db.query(Filter).filter(Filter.is_active == True).all()
@@ -321,12 +321,30 @@ class MonitoringService:
                         None, scrape_params, criteria=criteria
                     )
                 except Exception as exc:
-                    stats["errors"] += 1
-                    log_activity_isolated(
-                        LogCategory.ERROR, f"Facebook monitoring failed for {filter_name}",
-                        level=LogLevel.ERROR, details={"error": str(exc)}, source="facebook",
-                    )
+                    from app.services.facebook_errors import FacebookLoginRequiredError
+
                     db = SessionLocal()
+                    if isinstance(exc, FacebookLoginRequiredError):
+                        log_activity(
+                            db,
+                            LogCategory.MONITORING,
+                            str(exc),
+                            level=LogLevel.WARNING,
+                            source="monitor",
+                        )
+                        stats["login_required"] = True
+                    else:
+                        stats["errors"] += 1
+                        log_activity(
+                            db,
+                            LogCategory.MONITORING,
+                            f"Scan issue for {filter_name} — will retry",
+                            level=LogLevel.WARNING,
+                            details={"error": str(exc)},
+                            source="monitor",
+                        )
+                    db.commit()
+                    db.close()
                     continue
 
                 db = SessionLocal()
@@ -395,11 +413,20 @@ class MonitoringService:
             if monitoring:
                 monitoring.last_scan_at = now
                 if monitoring.is_enabled and not is_scan_cancelled():
-                    if stats["errors"] > 0 and stats["processed"] == 0:
+                    if stats.get("login_required"):
+                        monitoring.next_scan_at = now + timedelta(minutes=15)
+                        log_activity(
+                            db,
+                            LogCategory.MONITORING,
+                            "Waiting for Facebook login — run login-facebook.bat (check email), then Stop → Start",
+                            source="monitor",
+                        )
+                    elif stats["errors"] > 0 and stats["processed"] == 0:
                         monitoring.next_scan_at = now + timedelta(minutes=2)
                         log_activity(
                             db, LogCategory.MONITORING,
-                            "Scan failed — retry in 2 minutes",
+                            "Scan issue — retry in 2 minutes",
+                            level=LogLevel.WARNING,
                             source="monitor",
                         )
                     else:
@@ -421,6 +448,10 @@ class MonitoringService:
                 await self.facebook.release_browser(db, keep_open=False)
                 log_activity(db, LogCategory.MONITORING, "Bot stopped", source="monitor")
                 return {"status": "off", **stats}
+
+            if stats.get("login_required"):
+                await self.facebook.release_browser(db, keep_open=False)
+                return {"status": "login_required", **stats}
 
             log_activity(
                 db, LogCategory.MONITORING, "Listings check complete — waiting for next refresh",

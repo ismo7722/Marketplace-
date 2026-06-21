@@ -250,6 +250,13 @@ def update_settings(
     return {"message": "Settings updated"}
 
 
+@router.get("/settings/facebook-session")
+def get_facebook_session_status_endpoint(_: User = Depends(get_current_user)):
+    from app.services.facebook_session import get_facebook_session_status
+
+    return get_facebook_session_status()
+
+
 @router.post("/settings/clear-browser-session")
 async def clear_browser_session(
     db: Session = Depends(get_db),

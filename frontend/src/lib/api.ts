@@ -133,6 +133,7 @@ export const sendTestLoginReminder = () => api.post("/notifications/test-login-r
 export const getSettings = () => api.get("/settings")
 export const updateSettings = (settings: Record<string, string>) => api.put("/settings", { settings })
 export const clearBrowserSession = () => api.post("/settings/clear-browser-session")
+export const getFacebookSessionStatus = () => api.get("/settings/facebook-session")
 export const getLogs = (params: Record<string, unknown>) => api.get("/logs", { params })
 export const exportLogs = () => api.get("/logs/export/csv", { responseType: "blob" })
 export const deleteLogs = (ids: number[]) => api.delete("/logs", { data: { ids } })

@@ -1,4 +1,4 @@
-"""Facebook session — Playwright Chromium + cookie backup in facebook_session.json."""
+"""Facebook session — Playwright cookies in file + database (shared with Render)."""
 from __future__ import annotations
 
 import asyncio
@@ -14,6 +14,8 @@ from app.config import Settings, get_settings
 from app.services.scan_control import is_scan_cancelled
 
 logger = logging.getLogger(__name__)
+
+SESSION_DB_KEY = "facebook_session_storage"
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -67,10 +69,106 @@ def clear_facebook_browser_data(cfg: Settings | None = None) -> dict:
 def clear_session_file(cfg: Settings | None = None) -> bool:
     cfg = cfg or get_settings()
     path = session_file(cfg)
+    removed = False
     if path.exists():
         path.unlink()
+        removed = True
+    clear_session_in_db()
+    return removed
+
+
+def clear_session_in_db() -> None:
+    from app.database import SessionLocal
+    from app.models import ApplicationSetting
+
+    db = SessionLocal()
+    try:
+        row = db.query(ApplicationSetting).filter(ApplicationSetting.key == SESSION_DB_KEY).first()
+        if row:
+            db.delete(row)
+            db.commit()
+    finally:
+        db.close()
+
+
+def has_facebook_session_saved(cfg: Settings | None = None) -> bool:
+    cfg = cfg or get_settings()
+    path = session_file(cfg)
+    if path.exists() and path.stat().st_size > 20:
         return True
-    return False
+    from app.database import SessionLocal
+    from app.models import ApplicationSetting
+
+    db = SessionLocal()
+    try:
+        row = db.query(ApplicationSetting).filter(ApplicationSetting.key == SESSION_DB_KEY).first()
+        return bool(row and row.value and len(row.value.strip()) > 20)
+    finally:
+        db.close()
+
+
+def persist_session_file_to_db(cfg: Settings | None = None) -> bool:
+    cfg = cfg or get_settings()
+    path = session_file(cfg)
+    if not path.exists() or path.stat().st_size < 20:
+        return False
+    from app.database import SessionLocal
+    from app.models import ApplicationSetting
+
+    content = path.read_text(encoding="utf-8")
+    db = SessionLocal()
+    try:
+        row = db.query(ApplicationSetting).filter(ApplicationSetting.key == SESSION_DB_KEY).first()
+        if row:
+            row.value = content
+            row.category = "facebook"
+        else:
+            db.add(ApplicationSetting(key=SESSION_DB_KEY, value=content, category="facebook"))
+        db.commit()
+        logger.info("Facebook session saved to database")
+        return True
+    finally:
+        db.close()
+
+
+def restore_session_file_from_db(cfg: Settings | None = None) -> bool:
+    """Copy DB session to local file so Playwright can load cookies on Render."""
+    cfg = cfg or get_settings()
+    path = session_file(cfg)
+    from app.database import SessionLocal
+    from app.models import ApplicationSetting
+
+    db = SessionLocal()
+    try:
+        row = db.query(ApplicationSetting).filter(ApplicationSetting.key == SESSION_DB_KEY).first()
+        if not row or not row.value or len(row.value.strip()) < 20:
+            return False
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(row.value, encoding="utf-8")
+        return True
+    finally:
+        db.close()
+
+
+def get_facebook_session_status() -> dict:
+    cfg = get_settings()
+    path = session_file(cfg)
+    file_ok = path.exists() and path.stat().st_size > 20
+    db_ok = False
+    from app.database import SessionLocal
+    from app.models import ApplicationSetting
+
+    db = SessionLocal()
+    try:
+        row = db.query(ApplicationSetting).filter(ApplicationSetting.key == SESSION_DB_KEY).first()
+        db_ok = bool(row and row.value and len(row.value.strip()) > 20)
+    finally:
+        db.close()
+    return {
+        "has_session": file_ok or db_ok,
+        "has_file": file_ok,
+        "has_database": db_ok,
+    }
 
 
 def is_on_facebook_auth_flow(page: Page) -> bool:
@@ -297,6 +395,8 @@ async def wait_until_marketplace_logged_in(
 
 async def save_session(context: BrowserContext, cfg: Settings) -> None:
     try:
-        await context.storage_state(path=str(session_file(cfg)))
+        path = session_file(cfg)
+        await context.storage_state(path=str(path))
+        persist_session_file_to_db(cfg)
     except Exception as exc:
         logger.warning("Could not save session backup: %s", exc)

@@ -1,7 +1,8 @@
-"""Email reminder when Facebook manual login is still pending."""
+"""Email when Facebook session is missing or expired on the server."""
 from __future__ import annotations
 
 import logging
+import time
 
 from app.config import get_settings
 from app.database import SessionLocal
@@ -11,22 +12,31 @@ from app.services.log_service import log_activity_isolated
 
 logger = logging.getLogger(__name__)
 
-LOGIN_REMINDER_AFTER_SECONDS = 300  # 5 minutes after browser opens
+LOGIN_REMINDER_AFTER_SECONDS = 300
+LOGOUT_EMAIL_COOLDOWN_SECONDS = 3600
+_last_logout_email_at: float = 0.0
 
-LOGIN_REMINDER_HTML = """
+LOGOUT_ALERT_HTML = """
 <!DOCTYPE html>
 <html>
 <body style="font-family: Arial, sans-serif; padding: 32px; background: #f4f6f9;">
   <div style="max-width: 520px; margin: 0 auto; background: white; padding: 28px; border-radius: 12px;">
     <h2 style="color: #1877f2; margin-top: 0;">Facebook login required</h2>
-    <p>The monitoring bot opened the browser but Facebook is not logged in yet.</p>
-    <p><strong>Please open the Chromium window and log in to Facebook manually</strong> (including any 2FA).</p>
-    <p style="color: #65676b; font-size: 14px;">Monitoring will continue automatically once login is complete.</p>
+    <p>Marketplace monitoring is ON but Facebook is logged out.</p>
+    <p><strong>On your PC, run:</strong></p>
+    <p style="background:#f0f2f5;padding:12px;border-radius:8px;font-family:monospace;">login-facebook.bat</p>
+    <ol style="color:#333;line-height:1.6;">
+      <li>Chromium opens — log in to Facebook (2FA ok)</li>
+      <li>Session saves automatically</li>
+      <li>Dashboard → Stop → Start — all 7 stages run headless on the server</li>
+    </ol>
     <p style="color: #65676b; font-size: 12px; margin-top: 24px;">Facebook Marketplace Monitor</p>
   </div>
 </body>
 </html>
 """
+
+LOGIN_REMINDER_HTML = LOGOUT_ALERT_HTML
 
 
 def _reminder_recipients() -> list[str]:
@@ -48,45 +58,39 @@ def _reminder_recipients() -> list[str]:
     return emails
 
 
-async def send_facebook_login_reminder() -> bool:
-    """Send one login reminder to admin + alert recipients. Returns True if any email sent."""
+async def send_facebook_logout_alert() -> bool:
+    """One email per hour when bot detects Facebook logout on the server."""
+    global _last_logout_email_at
+    now = time.monotonic()
+    if now - _last_logout_email_at < LOGOUT_EMAIL_COOLDOWN_SECONDS:
+        return False
+
     recipients = _reminder_recipients()
     if not recipients:
-        log_activity_isolated(
-            LogCategory.NOTIFICATION,
-            "Login reminder skipped — no admin or alert email configured",
-            level=LogLevel.WARNING,
-            source="facebook",
-        )
         return False
 
     settings = get_settings()
     smtp = settings.smtp_config_dict()
-    subject = "Action required — log in to Facebook for Marketplace monitoring"
+    subject = "Action required — run login-facebook.bat to sign in to Facebook"
     sent_any = False
-    errors: list[str] = []
 
     for to_email in recipients:
-        ok, msg = await email_service.send_email(to_email, subject, LOGIN_REMINDER_HTML, smtp)
+        ok, _msg = await email_service.send_email(to_email, subject, LOGOUT_ALERT_HTML, smtp)
         if ok:
             sent_any = True
-            logger.info("Facebook login reminder sent to %s", to_email)
-        else:
-            errors.append(f"{to_email}: {msg}")
+            logger.info("Facebook logout alert sent to %s", to_email)
 
     if sent_any:
+        _last_logout_email_at = now
         log_activity_isolated(
             LogCategory.NOTIFICATION,
-            "Facebook login reminder email sent — please log in manually in the browser",
+            "Email sent — run login-facebook.bat on your PC to sign in to Facebook",
             details={"recipients": recipients},
             source="facebook",
         )
-    elif errors:
-        log_activity_isolated(
-            LogCategory.ERROR,
-            "Could not send Facebook login reminder email",
-            level=LogLevel.ERROR,
-            details={"errors": errors},
-            source="facebook",
-        )
     return sent_any
+
+
+async def send_facebook_login_reminder() -> bool:
+    """Visible-browser mode only — reminder after 5 minutes waiting for login."""
+    return await send_facebook_logout_alert()

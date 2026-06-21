@@ -11,8 +11,9 @@ from typing import Callable
 from playwright.async_api import Browser, BrowserContext, Page
 from sqlalchemy.orm import Session
 
-from app.config import Settings
+from app.config import Settings, is_cloud_host
 from app.models import LogCategory, LogLevel
+from app.services.browser_settings import get_playwright_headless
 from app.services.facebook_session import (
     USER_AGENT,
     POST_LOGIN_SETTLE_SECONDS,
@@ -22,6 +23,7 @@ from app.services.facebook_session import (
     _is_login_required,
     _is_marketplace_ready,
     reload_marketplace_after_login,
+    restore_session_file_from_db,
     save_session,
     session_file,
     wait_passive_for_login,
@@ -316,12 +318,24 @@ async def stage_open_marketplace(
 
 
 async def stage_ensure_login(page: Page, context: BrowserContext, cfg: Settings, log: LogFn, db: Session | None = None) -> bool:
+    from app.services.facebook_errors import FacebookLoginRequiredError, LOGIN_REQUIRED_LOG
+    from app.services.login_reminder_service import send_facebook_logout_alert
+
     log("Stage 2/7 — Checking Facebook login")
+    restore_session_file_from_db(cfg)
 
     if await is_login_fully_complete(context, page):
         log("Stage 2/7 — Logged in (saved session)")
         await save_session(context, cfg)
         return True
+
+    headless = get_playwright_headless(db)
+    on_server = is_cloud_host()
+
+    if headless and on_server:
+        log(f"Stage 2/7 — {LOGIN_REQUIRED_LOG}", level=LogLevel.WARNING)
+        await send_facebook_logout_alert()
+        raise FacebookLoginRequiredError(LOGIN_REQUIRED_LOG)
 
     if is_on_facebook_auth_flow(page):
         log("Stage 2/7 — Complete Facebook login/verification in browser — bot is completely idle")
@@ -330,8 +344,7 @@ async def stage_ensure_login(page: Page, context: BrowserContext, cfg: Settings,
             if await dismiss_login_popup_once(page):
                 log("Stage 2/7 — Login popup closed — use top header Email/Password to log in")
         log(
-            "Stage 2/7 — Not logged in — bot stays static until you log in via the top header "
-            "(reminder email after 5 minutes)",
+            "Stage 2/7 — Not logged in — log in in the Chromium window (reminder email after 5 minutes)",
             {"url": page.url},
         )
 

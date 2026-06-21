@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { Shield, Bell, Send, Trash2, Plus, Monitor, Eraser, Clock } from "lucide-react"
 import {
-  getSettings, updateSettings, changePassword, clearBrowserSession,
+  getSettings, updateSettings, changePassword, clearBrowserSession, getFacebookSessionStatus,
   getRecipients, addRecipient, deleteRecipient, sendTestEmail, sendTestLoginReminder,
   getMonitoringSettings, updateMonitoringSettings,
 } from "@/lib/api"
@@ -30,17 +30,20 @@ export default function SettingsPage() {
   const [maxSeconds, setMaxSeconds] = useState("45")
   const [scanMinSec, setScanMinSec] = useState(30)
   const [scanMaxSec, setScanMaxSec] = useState(45)
+  const [fbSession, setFbSession] = useState<{ has_session: boolean; has_database: boolean } | null>(null)
   const { user } = useAuth()
   const { toast } = useToast()
 
   const load = async () => {
-    const [settingsRes, recipientsRes, monitoringRes] = await Promise.all([
+    const [settingsRes, recipientsRes, monitoringRes, fbRes] = await Promise.all([
       getSettings(),
       getRecipients(),
       getMonitoringSettings(),
+      getFacebookSessionStatus(),
     ])
     setSettings(settingsRes.data)
     setRecipients(recipientsRes.data)
+    setFbSession(fbRes.data)
     const m = monitoringRes.data
     setScanMinSec(m.refresh_interval_min_seconds ?? 30)
     setScanMaxSec(m.refresh_interval_max_seconds ?? 45)
@@ -52,29 +55,15 @@ export default function SettingsPage() {
   useEffect(() => { load() }, [])
 
   const notificationsEnabled = settings.notifications_enabled !== "false"
-  const headlessMode = settings.playwright_headless !== "false"
-
-  const handleToggleHeadless = async (headless: boolean) => {
-    setSaving(true)
-    try {
-      await updateSettings({ playwright_headless: headless ? "true" : "false" })
-      setSettings((prev) => ({ ...prev, playwright_headless: headless ? "true" : "false" }))
-      toast(headless ? "Headless mode on — browser hidden during monitoring" : "Visible browser — Playwright Chromium opens on Start", "success")
-    } catch {
-      toast("Failed to save", "error")
-    } finally {
-      setSaving(false)
-    }
-  }
 
   const handleClearBrowserSession = async () => {
-    if (!confirm("Close the browser and wipe all Facebook login data?\n\nNext Start will open a fresh Playwright Chromium window (like first time).")) {
+    if (!confirm("Delete Facebook session?\n\nRun login-facebook.bat on your PC to sign in again, then Stop → Start.")) {
       return
     }
     setClearingSession(true)
     try {
       await clearBrowserSession()
-      toast("Browser closed and session wiped — next Start opens fresh Chromium", "success")
+      toast("Session cleared — run login-facebook.bat, then Stop → Start", "success")
     } catch {
       toast("Failed to clear browser session", "error")
     } finally {
@@ -334,33 +323,47 @@ export default function SettingsPage() {
 
       <Card>
         <CardHeader>
-          <div className="flex items-center gap-2">
-            <Monitor className="h-5 w-5 text-primary" />
-            <CardTitle>Browser</CardTitle>
-          </div>
-          <CardDescription>Control how Facebook Marketplace opens during monitoring</CardDescription>
+          <CardTitle>Facebook Login</CardTitle>
+          <CardDescription>
+            Deployed bot runs headless — sign in once on your PC, session syncs to the server
+          </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-3">
           <div className="flex items-center justify-between p-4 rounded-lg border border-border bg-muted/30">
             <div>
-              <p className="font-medium text-sm">Headless Mode</p>
+              <p className="font-medium text-sm">Session status</p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                {headlessMode
-                  ? "Browser runs hidden (default, recommended for server)"
-                  : "Playwright Chromium opens so you can see Facebook during monitoring"}
+                {fbSession?.has_session
+                  ? "Logged in — Render can run all 7 stages headless"
+                  : "Not logged in — run login-facebook.bat on your PC before Start"}
               </p>
             </div>
-            <Switch
-              checked={headlessMode}
-              onCheckedChange={handleToggleHeadless}
-              disabled={saving}
-            />
+            <Badge variant={fbSession?.has_session ? "success" : "destructive"}>
+              {fbSession?.has_session ? "Active" : "Missing"}
+            </Badge>
           </div>
+          <p className="text-sm text-muted-foreground">
+            1. Double-click <code className="bg-muted px-1 rounded">login-facebook.bat</code> on your PC<br />
+            2. Log in to Facebook in the Chromium window (2FA ok)<br />
+            3. Dashboard → Stop → Start — Stages 1–7 run headless on the server
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Monitor className="h-5 w-5 text-primary" />
+            <CardTitle>Facebook Session</CardTitle>
+          </div>
+          <CardDescription>Clear saved login — use login-facebook.bat to sign in again</CardDescription>
+        </CardHeader>
+        <CardContent>
           <div className="flex items-center justify-between p-4 rounded-lg border border-border bg-muted/30">
             <div>
-              <p className="font-medium text-sm">Clear browser (fresh start)</p>
+              <p className="font-medium text-sm">Clear session</p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Stops monitoring, closes Chromium, deletes session cookies. Next Start = fresh browser.
+                Removes Facebook cookies from the server. Run login-facebook.bat on your PC, then Stop → Start.
               </p>
             </div>
             <Button

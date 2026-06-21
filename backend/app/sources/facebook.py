@@ -17,6 +17,7 @@ from app.services.facebook_session import (
     is_login_fully_complete,
     is_on_facebook_auth_flow,
     needs_marketplace_navigation,
+    restore_session_file_from_db,
     save_session,
 )
 from app.services.facebook_flow import (
@@ -380,6 +381,7 @@ class FacebookMarketplaceSource(BaseMarketplaceSource):
         cfg = self._playwright_settings()
         headless = get_playwright_headless(db)
         log = _make_db_logger(db)
+        restore_session_file_from_db(cfg)
 
         location = MarketplaceLocation(
             city=scrape_params.city,
@@ -404,7 +406,7 @@ class FacebookMarketplaceSource(BaseMarketplaceSource):
 
             if not await is_login_fully_complete(context, page):
                 if not await stage_ensure_login(page, context, cfg, log, db):
-                    raise RuntimeError("Facebook login failed — log in manually in the browser window")
+                    raise RuntimeError("Facebook login not completed — finish login in the browser window")
             else:
                 log("Stage 2/7 — Already logged in")
 
@@ -457,15 +459,19 @@ class FacebookMarketplaceSource(BaseMarketplaceSource):
             self._store_session(playwright, browser, context, page)
 
         except PlaywrightTimeout as exc:
-            log("Facebook monitoring timed out", {"error": str(exc)}, level=LogLevel.ERROR)
+            log("Scan timed out — will retry later", {"error": str(exc)}, level=LogLevel.WARNING)
             if context and page and not headless:
                 self._store_session(playwright, browser, context, page)
             else:
                 await self.release_browser(db, keep_open=False)
             raise
         except Exception as exc:
+            from app.services.facebook_errors import FacebookLoginRequiredError
+
+            if isinstance(exc, FacebookLoginRequiredError):
+                raise
             logger.exception("Facebook monitoring failed: %s", exc)
-            log("Facebook monitoring failed", {"error": str(exc)}, level=LogLevel.ERROR)
+            log("Scan failed — see error details", {"error": str(exc)}, level=LogLevel.WARNING)
             if context and page and not headless:
                 self._store_session(playwright, browser, context, page)
             else:

@@ -106,7 +106,7 @@ export default function HelpPage() {
           </div>
           <p><strong className="text-foreground">Check interval</strong> — min and max <strong className="text-foreground">seconds</strong> on <SectionLink to="/monitoring" icon={Activity} label="Monitoring" />. After each pass (scroll + match), the bot waits a random time in that range, refreshes the Vehicles page, and looks for new listings.</p>
           <p><strong className="text-foreground">Listings saved</strong> — only vehicles that match <strong className="text-foreground">all</strong> your filter fields (brand, model, fuel, mileage, etc.). Price and location are applied on Facebook first.</p>
-          <p><strong className="text-foreground">Headless mode</strong> — <SectionLink to="/settings" icon={Settings} label="Settings" /> → Browser. Turn off to see Chrome and log in manually the first time.</p>
+          <p><strong className="text-foreground">Facebook login</strong> — run <code className="text-xs bg-muted px-1 py-0.5 rounded">login-facebook.bat</code> on your PC once. Session syncs to the server; monitoring always runs headless on Render.</p>
         </CardContent>
       </Card>
 
@@ -119,7 +119,7 @@ export default function HelpPage() {
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-muted-foreground">
           <p><strong className="text-foreground">Admin login</strong> — for this dashboard only (filters, Start/Stop, settings). Set via <code className="text-xs bg-muted px-1 py-0.5 rounded">ADMIN_EMAIL</code> / <code className="text-xs bg-muted px-1 py-0.5 rounded">ADMIN_PASSWORD</code> in backend <code className="text-xs bg-muted px-1 py-0.5 rounded">.env</code>. Protects your control panel when deployed on a server.</p>
-          <p><strong className="text-foreground">Facebook login</strong> — first time log in manually in the Chrome window (Headless off). Session is saved to <code className="text-xs bg-muted px-1 py-0.5 rounded">data/facebook_session.json</code> for later runs.</p>
+          <p><strong className="text-foreground">Facebook login</strong> — run <code className="text-xs bg-muted px-1 py-0.5 rounded">login-facebook.bat</code> on your PC (visible browser). Session is saved to the database for headless monitoring on the server.</p>
         </CardContent>
       </Card>
 

@@ -1,38 +1,29 @@
-"""Playwright browser — headless ON/OFF from dashboard; same 7 stages either way."""
+"""Playwright always headless for monitoring — login-facebook.bat uses visible browser."""
 from __future__ import annotations
+
+import os
 
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.database import SessionLocal
 from app.models import ApplicationSetting
 
 
 def get_playwright_headless(db: Session | None = None) -> bool:
-    """False = visible Chromium window. True = headless. Stages 1–7 are identical."""
-    settings = get_settings()
-    if settings.PLAYWRIGHT_HEADLESS is not None:
-        return settings.PLAYWRIGHT_HEADLESS
-
-    own_session = db is None
-    if own_session:
-        db = SessionLocal()
-    try:
-        row = db.query(ApplicationSetting).filter(ApplicationSetting.key == "playwright_headless").first()
-        if row is None:
-            return False
-        return row.value == "true"
-    finally:
-        if own_session:
-            db.close()
+    """Monitoring is always headless. login-facebook.bat sets FACEBOOK_LOGIN_MODE for visible login."""
+    if os.environ.get("FACEBOOK_LOGIN_MODE", "").strip().lower() in ("1", "true", "yes"):
+        return False
+    return True
 
 
 def ensure_visible_browser_setting(db: Session) -> None:
-    """Default: visible browser (headless off). User changes this in Settings."""
+    """Keep DB in sync — monitoring always headless."""
     row = db.query(ApplicationSetting).filter(ApplicationSetting.key == "playwright_headless").first()
     if row is None:
-        db.add(ApplicationSetting(key="playwright_headless", value="false", category="browser"))
-        db.commit()
+        db.add(ApplicationSetting(key="playwright_headless", value="true", category="browser"))
+    elif row.value != "true":
+        row.value = "true"
+    db.commit()
 
 
 def get_playwright_timeout() -> int:
