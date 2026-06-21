@@ -10,6 +10,8 @@ COPY backend/ .
 ENV PYTHONUNBUFFERED=1
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Ensure Playwright browsers install into the project's `playwright-browsers` folder
+ENV PLAYWRIGHT_BROWSERS_PATH=/app/backend/playwright-browsers
 # Install Playwright browsers and OS deps
 RUN python -m playwright install --with-deps || true
 
