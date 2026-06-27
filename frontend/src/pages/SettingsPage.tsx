@@ -3,7 +3,7 @@ import { Shield, Bell, Send, Trash2, Plus, Monitor, Eraser, Clock } from "lucide
 import {
   getSettings, updateSettings, changePassword, clearBrowserSession, getFacebookSessionStatus,
   getRecipients, addRecipient, deleteRecipient, sendTestEmail,
-  getMonitoringSettings, updateMonitoringSettings,
+  getMonitoringSettings, updateMonitoringSettings, apiErrorMessage,
 } from "@/lib/api"
 import { useAuth } from "@/contexts/AuthContext"
 import { useToast } from "@/contexts/ToastContext"
@@ -12,7 +12,7 @@ import { Input, Label } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Switch } from "@/components/ui/switch"
 import { Badge, Spinner } from "@/components/ui/badge"
-import { SCAN_DELAY_PRESETS, formatIntervalRange } from "@/lib/utils"
+import { SCAN_DELAY_PRESETS, formatIntervalRange, MIN_SCAN_INTERVAL_SECONDS, DEFAULT_SCAN_MIN_SECONDS, DEFAULT_SCAN_MAX_SECONDS } from "@/lib/utils"
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Record<string, string>>({})
@@ -25,10 +25,10 @@ export default function SettingsPage() {
   const [sending, setSending] = useState(false)
   const [currentPassword, setCurrentPassword] = useState("")
   const [newPassword, setNewPassword] = useState("")
-  const [minSeconds, setMinSeconds] = useState("30")
-  const [maxSeconds, setMaxSeconds] = useState("45")
-  const [scanMinSec, setScanMinSec] = useState(30)
-  const [scanMaxSec, setScanMaxSec] = useState(45)
+  const [minSeconds, setMinSeconds] = useState(String(DEFAULT_SCAN_MIN_SECONDS))
+  const [maxSeconds, setMaxSeconds] = useState(String(DEFAULT_SCAN_MAX_SECONDS))
+  const [scanMinSec, setScanMinSec] = useState(DEFAULT_SCAN_MIN_SECONDS)
+  const [scanMaxSec, setScanMaxSec] = useState(DEFAULT_SCAN_MAX_SECONDS)
   const [fbSession, setFbSession] = useState<{ has_session: boolean; has_database: boolean } | null>(null)
   const { user } = useAuth()
   const { toast } = useToast()
@@ -44,10 +44,10 @@ export default function SettingsPage() {
     setRecipients(recipientsRes.data)
     setFbSession(fbRes.data)
     const m = monitoringRes.data
-    setScanMinSec(m.refresh_interval_min_seconds ?? 30)
-    setScanMaxSec(m.refresh_interval_max_seconds ?? 45)
-    setMinSeconds(String(m.refresh_interval_min_seconds || 30))
-    setMaxSeconds(String(m.refresh_interval_max_seconds || 45))
+    setScanMinSec(m.refresh_interval_min_seconds ?? DEFAULT_SCAN_MIN_SECONDS)
+    setScanMaxSec(m.refresh_interval_max_seconds ?? DEFAULT_SCAN_MAX_SECONDS)
+    setMinSeconds(String(m.refresh_interval_min_seconds || DEFAULT_SCAN_MIN_SECONDS))
+    setMaxSeconds(String(m.refresh_interval_max_seconds || DEFAULT_SCAN_MAX_SECONDS))
     setLoading(false)
   }
 
@@ -84,8 +84,8 @@ export default function SettingsPage() {
   }
 
   const saveScanInterval = async (minSec: number, maxSec: number) => {
-    if (minSec < 30) {
-      toast("Minimum delay is 30 seconds", "warning")
+    if (minSec < MIN_SCAN_INTERVAL_SECONDS) {
+      toast(`Minimum delay is ${MIN_SCAN_INTERVAL_SECONDS} seconds`, "warning")
       return
     }
     if (maxSec < minSec) {
@@ -100,9 +100,9 @@ export default function SettingsPage() {
       })
       setScanMinSec(data.refresh_interval_min_seconds ?? minSec)
       setScanMaxSec(data.refresh_interval_max_seconds ?? maxSec)
-        toast("Monitoring interval saved", "success")
-    } catch {
-      toast("Failed to save monitoring interval", "error")
+      toast("Monitoring interval saved", "success")
+    } catch (err) {
+      toast(apiErrorMessage(err, "Failed to save monitoring interval"), "error")
     } finally {
       setSaving(false)
     }
@@ -259,7 +259,7 @@ export default function SettingsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
             {SCAN_DELAY_PRESETS.map((opt) => {
               const active = scanMinSec === opt.min && scanMaxSec === opt.max
               return (
@@ -278,11 +278,11 @@ export default function SettingsPage() {
           <div className="flex flex-col sm:flex-row items-end gap-3 pt-2 border-t border-border">
             <div className="space-y-2 flex-1">
               <Label>Min seconds</Label>
-              <Input type="number" min={30} step={1} value={minSeconds} onChange={(e) => setMinSeconds(e.target.value)} />
+              <Input type="number" min={MIN_SCAN_INTERVAL_SECONDS} step={1} value={minSeconds} onChange={(e) => setMinSeconds(e.target.value)} />
             </div>
             <div className="space-y-2 flex-1">
               <Label>Max seconds</Label>
-              <Input type="number" min={30} step={1} value={maxSeconds} onChange={(e) => setMaxSeconds(e.target.value)} />
+              <Input type="number" min={MIN_SCAN_INTERVAL_SECONDS} step={1} value={maxSeconds} onChange={(e) => setMaxSeconds(e.target.value)} />
             </div>
             <Button variant="secondary" onClick={applyCustomScanInterval} disabled={saving}>
               Save interval

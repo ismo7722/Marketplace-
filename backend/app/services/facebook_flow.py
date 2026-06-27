@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import re
 import time
 from dataclasses import dataclass
@@ -1853,20 +1854,22 @@ async def stage_scrape_listings(
     max_results: int,
     log: LogFn,
     *,
-    scroll_passes: int = 3,
+    scroll_passes: int | None = None,
 ) -> list[dict]:
+    passes = scroll_passes if scroll_passes is not None else random.randint(4, 5)
+    passes = max(1, passes)
     log(
         "Stage 5/5 — Reading listings from Vehicles page (only filter-matched ones are saved)",
-        {"max_read": max_results},
+        {"max_read": max_results, "scroll_passes": passes},
     )
     await _require_scrape_page_ready(page, log, "Stage 5/5")
-    passes = max(1, scroll_passes)
     for _ in range(passes):
-        await page.evaluate("window.scrollBy(0, window.innerHeight)")
-        await asyncio.sleep(0.8)
+        step = random.uniform(0.75, 0.9)
+        await page.evaluate(f"window.scrollBy(0, window.innerHeight * {step})")
+        await asyncio.sleep(random.uniform(0.9, 1.4))
     if passes > 1:
         await page.evaluate("window.scrollTo(0, 0)")
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(random.uniform(0.4, 0.7))
 
     items = await page.evaluate("""
         () => {

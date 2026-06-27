@@ -155,12 +155,9 @@ class FacebookMarketplaceSource(BaseMarketplaceSource):
         criteria: FilterCriteria | None,
         max_results: int,
         *,
-        scroll_passes: int,
         nav_timeout: int,
     ) -> list[ListingData]:
-        grid_items = await stage_scrape_listings(
-            page, max_results, log, scroll_passes=scroll_passes
-        )
+        grid_items = await stage_scrape_listings(page, max_results, log)
         on_page = len(grid_items)
         vehicles_url = page.url
         self._session_vehicles_url = vehicles_url
@@ -484,7 +481,6 @@ class FacebookMarketplaceSource(BaseMarketplaceSource):
                     log,
                     criteria,
                     max_results,
-                    scroll_passes=6,
                     nav_timeout=nav_timeout,
                 )
             else:
@@ -517,7 +513,6 @@ class FacebookMarketplaceSource(BaseMarketplaceSource):
                         log,
                         criteria,
                         max_results,
-                        scroll_passes=4,
                         nav_timeout=nav_timeout,
                     )
                 except Exception as exc:

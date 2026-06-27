@@ -71,6 +71,19 @@ export function loginErrorMessage(error: unknown): string {
   return "Login failed — try again."
 }
 
+export function apiErrorMessage(error: unknown, fallback = "Request failed — try again."): string {
+  if (axios.isAxiosError(error)) {
+    const detail = error.response?.data?.detail
+    if (typeof detail === "string") return detail
+    if (Array.isArray(detail) && detail.length > 0) {
+      const first = detail[0]
+      if (typeof first?.msg === "string") return first.msg
+    }
+    if (!error.response) return "Cannot reach the backend — check your connection and try again."
+  }
+  return fallback
+}
+
 // Auth
 export const login = (email: string, password: string) =>
   api.post("/auth/login", { email, password }, { timeout: 20000 })

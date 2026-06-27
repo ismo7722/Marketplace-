@@ -2,13 +2,14 @@
 from sqlalchemy import inspect, text
 
 from app.database import SessionLocal, engine
+from app.services.scan_schedule import DEFAULT_SCAN_MAX_SECONDS, DEFAULT_SCAN_MIN_SECONDS
 
-LEGACY_INTERVAL_PRESETS = {
-    (120, 180),
-    (120, 300),
-    (180, 420),
-    (300, 600),
-    (600, 900),
+# Old fast intervals (unsafe for 24/7 Facebook monitoring).
+UNSAFE_FAST_INTERVALS = {
+    (30, 45),
+    (30, 60),
+    (45, 90),
+    (60, 120),
 }
 
 
@@ -22,20 +23,20 @@ def ensure_monitoring_interval_columns() -> None:
             conn.execute(
                 text(
                     "ALTER TABLE monitoring_settings "
-                    "ADD COLUMN refresh_interval_min_seconds INTEGER NOT NULL DEFAULT 30"
+                    f"ADD COLUMN refresh_interval_min_seconds INTEGER NOT NULL DEFAULT {DEFAULT_SCAN_MIN_SECONDS}"
                 )
             )
         if "refresh_interval_max_seconds" not in existing:
             conn.execute(
                 text(
                     "ALTER TABLE monitoring_settings "
-                    "ADD COLUMN refresh_interval_max_seconds INTEGER NOT NULL DEFAULT 45"
+                    f"ADD COLUMN refresh_interval_max_seconds INTEGER NOT NULL DEFAULT {DEFAULT_SCAN_MAX_SECONDS}"
                 )
             )
 
 
 def migrate_legacy_monitoring_intervals() -> None:
-    """Move old slow reload presets to the new default check interval."""
+    """Bump old sub-90s intervals to the safe default (90–120 s)."""
     from app.models import MonitoringSetting
 
     db = SessionLocal()
@@ -44,10 +45,10 @@ def migrate_legacy_monitoring_intervals() -> None:
         if not row:
             return
         current = (row.refresh_interval_min_seconds, row.refresh_interval_max_seconds)
-        if current in LEGACY_INTERVAL_PRESETS:
-            row.refresh_interval_min_seconds = 30
-            row.refresh_interval_max_seconds = 45
-            row.refresh_interval_seconds = 45
+        if row.refresh_interval_min_seconds < DEFAULT_SCAN_MIN_SECONDS or current in UNSAFE_FAST_INTERVALS:
+            row.refresh_interval_min_seconds = DEFAULT_SCAN_MIN_SECONDS
+            row.refresh_interval_max_seconds = DEFAULT_SCAN_MAX_SECONDS
+            row.refresh_interval_seconds = DEFAULT_SCAN_MAX_SECONDS
             db.commit()
     finally:
         db.close()

@@ -83,9 +83,9 @@ def seed_database(db: Session, admin_email: str, admin_password: str) -> None:
     if not db.query(MonitoringSetting).first():
         db.add(MonitoringSetting(
             is_enabled=False,
-            refresh_interval_seconds=45,
-            refresh_interval_min_seconds=30,
-            refresh_interval_max_seconds=45,
+            refresh_interval_seconds=120,
+            refresh_interval_min_seconds=90,
+            refresh_interval_max_seconds=120,
         ))
 
     if not db.query(Filter).first():

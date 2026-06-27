@@ -11,9 +11,9 @@ class MonitoringSetting(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    refresh_interval_seconds: Mapped[int] = mapped_column(Integer, default=45, nullable=False)
-    refresh_interval_min_seconds: Mapped[int] = mapped_column(Integer, default=30, nullable=False)
-    refresh_interval_max_seconds: Mapped[int] = mapped_column(Integer, default=45, nullable=False)
+    refresh_interval_seconds: Mapped[int] = mapped_column(Integer, default=120, nullable=False)
+    refresh_interval_min_seconds: Mapped[int] = mapped_column(Integer, default=90, nullable=False)
+    refresh_interval_max_seconds: Mapped[int] = mapped_column(Integer, default=120, nullable=False)
     last_scan_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     next_scan_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_scanning: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

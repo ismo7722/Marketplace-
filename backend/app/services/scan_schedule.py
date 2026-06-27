@@ -9,13 +9,17 @@ from app.models import MonitoringSetting
 
 logger = logging.getLogger(__name__)
 
+MIN_SCAN_INTERVAL_SECONDS = 90
+DEFAULT_SCAN_MIN_SECONDS = 90
+DEFAULT_SCAN_MAX_SECONDS = 120
+
 
 def normalize_interval_bounds(monitoring: MonitoringSetting) -> tuple[int, int]:
-    min_s = monitoring.refresh_interval_min_seconds or 30
-    max_s = monitoring.refresh_interval_max_seconds or 45
+    min_s = monitoring.refresh_interval_min_seconds or DEFAULT_SCAN_MIN_SECONDS
+    max_s = monitoring.refresh_interval_max_seconds or DEFAULT_SCAN_MAX_SECONDS
     if min_s > max_s:
         min_s, max_s = max_s, min_s
-    min_s = max(30, min_s)
+    min_s = max(MIN_SCAN_INTERVAL_SECONDS, min_s)
     max_s = max(min_s, max_s)
     return min_s, max_s
 

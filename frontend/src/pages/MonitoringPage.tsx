@@ -1,16 +1,16 @@
 import { useEffect, useState } from "react"
 import { RefreshCw, Clock } from "lucide-react"
-import { getMonitoringSettings, updateMonitoringSettings } from "@/lib/api"
+import { getMonitoringSettings, updateMonitoringSettings, apiErrorMessage } from "@/lib/api"
 import type { MonitoringSettings } from "@/types"
 import { Button } from "@/components/ui/button"
 import { Input, Label } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge, Spinner } from "@/components/ui/badge"
 import { useToast } from "@/contexts/ToastContext"
-import { SCAN_DELAY_PRESETS, formatDate, formatIntervalRange } from "@/lib/utils"
+import { SCAN_DELAY_PRESETS, formatDate, formatIntervalRange, MIN_SCAN_INTERVAL_SECONDS, DEFAULT_SCAN_MIN_SECONDS, DEFAULT_SCAN_MAX_SECONDS } from "@/lib/utils"
 
-const DEFAULT_MIN = 30
-const DEFAULT_MAX = 45
+const DEFAULT_MIN = DEFAULT_SCAN_MIN_SECONDS
+const DEFAULT_MAX = DEFAULT_SCAN_MAX_SECONDS
 
 export default function MonitoringPage() {
   const [settings, setSettings] = useState<MonitoringSettings | null>(null)
@@ -42,16 +42,16 @@ export default function MonitoringPage() {
       setMinSeconds(String(data.refresh_interval_min_seconds || DEFAULT_MIN))
       setMaxSeconds(String(data.refresh_interval_max_seconds || DEFAULT_MAX))
       toast("Monitoring interval saved", "success")
-    } catch {
-      toast("Failed to save settings", "error")
+    } catch (err) {
+      toast(apiErrorMessage(err, "Failed to save settings"), "error")
     } finally {
       setSaving(false)
     }
   }
 
   const saveDelayRange = async (minSec: number, maxSec: number) => {
-    if (minSec < 30) {
-      toast("Minimum is 30 seconds", "warning")
+    if (minSec < MIN_SCAN_INTERVAL_SECONDS) {
+      toast(`Minimum is ${MIN_SCAN_INTERVAL_SECONDS} seconds`, "warning")
       return
     }
     if (maxSec < minSec) {
@@ -123,7 +123,9 @@ export default function MonitoringPage() {
               <RefreshCw className="h-5 w-5 text-[#1877F2] shrink-0" />
               <div>
                 <p className="text-2xl font-bold tabular-nums">{formatIntervalRange(minSec, maxSec)}</p>
-                <p className="text-xs text-muted-foreground mt-1">Minimum 30 seconds each value</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Minimum {MIN_SCAN_INTERVAL_SECONDS} seconds — slower is safer for your Facebook account
+                </p>
               </div>
             </div>
           </CardContent>
@@ -159,11 +161,11 @@ export default function MonitoringPage() {
           <div className="flex flex-col sm:flex-row items-end gap-3 pt-4 border-t border-border">
             <div className="space-y-2 flex-1">
               <Label>Min seconds</Label>
-              <Input type="number" min={30} step={1} value={minSeconds} onChange={(e) => setMinSeconds(e.target.value)} />
+              <Input type="number" min={MIN_SCAN_INTERVAL_SECONDS} step={1} value={minSeconds} onChange={(e) => setMinSeconds(e.target.value)} />
             </div>
             <div className="space-y-2 flex-1">
               <Label>Max seconds</Label>
-              <Input type="number" min={30} step={1} value={maxSeconds} onChange={(e) => setMaxSeconds(e.target.value)} />
+              <Input type="number" min={MIN_SCAN_INTERVAL_SECONDS} step={1} value={maxSeconds} onChange={(e) => setMaxSeconds(e.target.value)} />
             </div>
             <Button variant="secondary" onClick={applyCustomRange} disabled={saving}>
               Save interval

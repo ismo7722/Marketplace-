@@ -50,6 +50,13 @@ from app.services.log_service import log_activity, log_activity_isolated
 from app.services.monitoring_runner import run_async_in_thread
 from app.services.monitoring_service import get_smtp_settings, monitoring_service
 from app.services.listing_query import matched_listings_query
+from app.services.scan_schedule import (
+    DEFAULT_SCAN_MAX_SECONDS,
+    DEFAULT_SCAN_MIN_SECONDS,
+    MIN_SCAN_INTERVAL_SECONDS,
+    normalize_interval_bounds,
+    schedule_next_scan,
+)
 
 router = APIRouter(tags=["Dashboard & Settings"])
 
@@ -114,10 +121,20 @@ def get_monitoring_settings(db: Session = Depends(get_db), _: User = Depends(get
     monitoring = db.query(MonitoringSetting).first()
     if not monitoring:
         monitoring = MonitoringSetting(
-            refresh_interval_min_seconds=30,
-            refresh_interval_max_seconds=45,
+            refresh_interval_min_seconds=DEFAULT_SCAN_MIN_SECONDS,
+            refresh_interval_max_seconds=DEFAULT_SCAN_MAX_SECONDS,
         )
         db.add(monitoring)
+        db.commit()
+        db.refresh(monitoring)
+    min_s, max_s = normalize_interval_bounds(monitoring)
+    if (
+        monitoring.refresh_interval_min_seconds != min_s
+        or monitoring.refresh_interval_max_seconds != max_s
+    ):
+        monitoring.refresh_interval_min_seconds = min_s
+        monitoring.refresh_interval_max_seconds = max_s
+        monitoring.refresh_interval_seconds = max_s
         db.commit()
         db.refresh(monitoring)
     return _monitoring_response(monitoring)
@@ -144,13 +161,19 @@ async def update_monitoring_settings(
             monitoring.next_scan_at = None
 
     if data.refresh_interval_min_seconds is not None:
-        if data.refresh_interval_min_seconds < 30:
-            raise HTTPException(status_code=400, detail="Minimum delay is 30 seconds")
+        if data.refresh_interval_min_seconds < MIN_SCAN_INTERVAL_SECONDS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Minimum delay is {MIN_SCAN_INTERVAL_SECONDS} seconds",
+            )
         monitoring.refresh_interval_min_seconds = data.refresh_interval_min_seconds
 
     if data.refresh_interval_max_seconds is not None:
-        if data.refresh_interval_max_seconds < 30:
-            raise HTTPException(status_code=400, detail="Maximum delay is 30 seconds")
+        if data.refresh_interval_max_seconds < MIN_SCAN_INTERVAL_SECONDS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Maximum delay is at least {MIN_SCAN_INTERVAL_SECONDS} seconds",
+            )
         monitoring.refresh_interval_max_seconds = data.refresh_interval_max_seconds
 
     min_s, max_s = normalize_interval_bounds(monitoring)

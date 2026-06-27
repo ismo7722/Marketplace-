@@ -25,12 +25,18 @@ export function formatMileage(mileage: number | null | undefined) {
   return `${mileage.toLocaleString("de-CH")} km`
 }
 
+/** Minimum safe wait between listing checks (account protection). */
+export const MIN_SCAN_INTERVAL_SECONDS = 90
+export const DEFAULT_SCAN_MIN_SECONDS = 90
+export const DEFAULT_SCAN_MAX_SECONDS = 120
+
+/** Five preset blocks — fastest (90–120 s) to slowest (210–240 s). */
 export const SCAN_DELAY_PRESETS = [
-  { label: "30–45 s", min: 30, max: 45 },
-  { label: "30–60 s", min: 30, max: 60 },
-  { label: "45–90 s", min: 45, max: 90 },
-  { label: "60–120 s", min: 60, max: 120 },
-  { label: "90–180 s", min: 90, max: 180 },
+  { label: "90–120 s", min: 90, max: 120 },
+  { label: "120–150 s", min: 120, max: 150 },
+  { label: "150–180 s", min: 150, max: 180 },
+  { label: "180–210 s", min: 180, max: 210 },
+  { label: "210–240 s", min: 210, max: 240 },
 ]
 
 export function formatDuration(seconds: number) {
@@ -41,7 +47,7 @@ export function formatDuration(seconds: number) {
   return `${m} min ${s} sec`
 }
 
-/** User-facing check interval, e.g. "30–45 sec (random)" */
+/** User-facing check interval, e.g. "90–120 sec (random)" */
 export function formatIntervalRange(minSec: number, maxSec: number) {
   if (minSec === maxSec) return `${minSec} sec`
   return `${minSec}–${maxSec} sec (random)`

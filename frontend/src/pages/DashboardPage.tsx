@@ -8,7 +8,7 @@ import { useEffect, useState } from "react"
 import { StatCard } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Spinner } from "@/components/ui/badge"
-import { formatDate, formatIntervalRange } from "@/lib/utils"
+import { formatDate, formatIntervalRange, DEFAULT_SCAN_MIN_SECONDS, DEFAULT_SCAN_MAX_SECONDS } from "@/lib/utils"
 import { cn } from "@/lib/utils"
 
 function InfoCard({ to, icon: Icon, label, value, iconClass }: {
@@ -48,8 +48,8 @@ export default function DashboardPage() {
     return <div className="flex justify-center py-20"><Spinner className="h-8 w-8" /></div>
   }
 
-  const minSec = settings?.refresh_interval_min_seconds ?? 30
-  const maxSec = settings?.refresh_interval_max_seconds ?? 45
+  const minSec = settings?.refresh_interval_min_seconds ?? DEFAULT_SCAN_MIN_SECONDS
+  const maxSec = settings?.refresh_interval_max_seconds ?? DEFAULT_SCAN_MAX_SECONDS
 
   return (
     <div className="space-y-6 animate-fade-in">
