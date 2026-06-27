@@ -7,7 +7,7 @@ import { Input, Label } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge, Spinner } from "@/components/ui/badge"
 import { useToast } from "@/contexts/ToastContext"
-import { SCAN_DELAY_PRESETS, formatDate, formatIntervalRange, MIN_SCAN_INTERVAL_SECONDS, DEFAULT_SCAN_MIN_SECONDS, DEFAULT_SCAN_MAX_SECONDS } from "@/lib/utils"
+import { SCAN_DELAY_PRESETS, formatDate, formatIntervalRange, normalizeIntervalBounds, MIN_SCAN_INTERVAL_SECONDS, DEFAULT_SCAN_MIN_SECONDS, DEFAULT_SCAN_MAX_SECONDS } from "@/lib/utils"
 
 const DEFAULT_MIN = DEFAULT_SCAN_MIN_SECONDS
 const DEFAULT_MAX = DEFAULT_SCAN_MAX_SECONDS
@@ -25,8 +25,12 @@ export default function MonitoringPage() {
     try {
       const { data } = await getMonitoringSettings()
       setSettings(data)
-      setMinSeconds(String(data.refresh_interval_min_seconds || DEFAULT_MIN))
-      setMaxSeconds(String(data.refresh_interval_max_seconds || DEFAULT_MAX))
+      const interval = normalizeIntervalBounds(
+        data.refresh_interval_min_seconds,
+        data.refresh_interval_max_seconds,
+      )
+      setMinSeconds(String(interval.min))
+      setMaxSeconds(String(interval.max))
     } finally {
       setLoading(false)
     }
@@ -39,8 +43,12 @@ export default function MonitoringPage() {
     try {
       const { data } = await updateMonitoringSettings(updates)
       setSettings(data)
-      setMinSeconds(String(data.refresh_interval_min_seconds || DEFAULT_MIN))
-      setMaxSeconds(String(data.refresh_interval_max_seconds || DEFAULT_MAX))
+      const interval = normalizeIntervalBounds(
+        data.refresh_interval_min_seconds,
+        data.refresh_interval_max_seconds,
+      )
+      setMinSeconds(String(interval.min))
+      setMaxSeconds(String(interval.max))
       toast("Monitoring interval saved", "success")
     } catch (err) {
       toast(apiErrorMessage(err, "Failed to save settings"), "error")
@@ -76,8 +84,10 @@ export default function MonitoringPage() {
 
   if (loading) return <div className="flex justify-center py-20"><Spinner className="h-8 w-8" /></div>
 
-  const minSec = settings?.refresh_interval_min_seconds ?? DEFAULT_MIN
-  const maxSec = settings?.refresh_interval_max_seconds ?? DEFAULT_MAX
+  const { min: minSec, max: maxSec } = normalizeIntervalBounds(
+    settings?.refresh_interval_min_seconds,
+    settings?.refresh_interval_max_seconds,
+  )
 
   return (
     <div className="space-y-6 animate-fade-in">

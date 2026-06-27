@@ -20,7 +20,7 @@ from app.models import (
     NotificationRecipient,
     NotificationStatus,
 )
-from app.services.browser_settings import ensure_visible_browser_setting
+from app.services.browser_settings import ensure_visible_browser_setting, get_playwright_headless
 from app.services.email_service import email_service
 from app.services.log_service import log_activity, log_activity_isolated
 from app.services.matching_engine import FilterCriteria, ListingData, MatchingEngine, listing_to_hash
@@ -293,7 +293,7 @@ class MonitoringService:
                 pass
 
     async def _execute_scan(self, db: Session, monitoring: MonitoringSetting, force: bool, stats: dict) -> dict:
-        headless_mode = True
+        headless_mode = get_playwright_headless(db)
         db.commit()
         try:
             active_filters = db.query(Filter).filter(Filter.is_active == True).all()

@@ -12,7 +12,7 @@ import { Input, Label } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Switch } from "@/components/ui/switch"
 import { Badge, Spinner } from "@/components/ui/badge"
-import { SCAN_DELAY_PRESETS, formatIntervalRange, MIN_SCAN_INTERVAL_SECONDS, DEFAULT_SCAN_MIN_SECONDS, DEFAULT_SCAN_MAX_SECONDS } from "@/lib/utils"
+import { SCAN_DELAY_PRESETS, formatIntervalRange, normalizeIntervalBounds, MIN_SCAN_INTERVAL_SECONDS, DEFAULT_SCAN_MIN_SECONDS, DEFAULT_SCAN_MAX_SECONDS } from "@/lib/utils"
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Record<string, string>>({})
@@ -44,10 +44,14 @@ export default function SettingsPage() {
     setRecipients(recipientsRes.data)
     setFbSession(fbRes.data)
     const m = monitoringRes.data
-    setScanMinSec(m.refresh_interval_min_seconds ?? DEFAULT_SCAN_MIN_SECONDS)
-    setScanMaxSec(m.refresh_interval_max_seconds ?? DEFAULT_SCAN_MAX_SECONDS)
-    setMinSeconds(String(m.refresh_interval_min_seconds || DEFAULT_SCAN_MIN_SECONDS))
-    setMaxSeconds(String(m.refresh_interval_max_seconds || DEFAULT_SCAN_MAX_SECONDS))
+    const interval = normalizeIntervalBounds(
+      m.refresh_interval_min_seconds,
+      m.refresh_interval_max_seconds,
+    )
+    setScanMinSec(interval.min)
+    setScanMaxSec(interval.max)
+    setMinSeconds(String(interval.min))
+    setMaxSeconds(String(interval.max))
     setLoading(false)
   }
 

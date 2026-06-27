@@ -133,13 +133,13 @@ def ensure_single_instance(port: int) -> None:
     if stored and stored != os.getpid() and is_pid_alive(stored):
         if stored in get_listening_pids(port):
             print(f"\nBackend is already running (PID {stored}) on http://127.0.0.1:{port}")
-            print("Run stop-backend.bat first if you want to restart.\n")
+            print("Run startall.bat first if you want to restart.\n")
             sys.exit(0)
 
     free_port(port)
     if not wait_until_port_free(port):
         print(f"\nERROR: Port {port} is still in use.")
-        print("Run stop-backend.bat, close all backend CMD windows, then try again.\n")
+        print("Run startall.bat, close all backend CMD windows, then try again.\n")
         sys.exit(1)
 
 

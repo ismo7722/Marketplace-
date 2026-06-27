@@ -116,7 +116,7 @@ def seed_database(db: Session, admin_email: str, admin_password: str) -> None:
     default_settings = {
         "notifications_enabled": "true",
         "app_theme": "light",
-        "playwright_headless": "true",
+        "playwright_headless": "true",  # ensure_visible_browser_setting fixes local vs cloud on startup
     }
     for key, value in default_settings.items():
         if not db.query(ApplicationSetting).filter(ApplicationSetting.key == key).first():

@@ -88,7 +88,7 @@ def main() -> int:
     step("=== Using .env admin creds for TEST only (not implemented in app) ===")
 
     if not wait_backend():
-        step("FAIL — backend not ready. Run start-backend.bat first.")
+        step("FAIL — backend not ready. Run startall.bat first.")
         return 1
 
     try:

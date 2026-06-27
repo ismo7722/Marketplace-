@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     SMTP_USE_TLS: bool = True
 
     PLAYWRIGHT_TIMEOUT: int = 60000
-    # None = always headless for monitoring. Set False only for local debugging.
+    # None = auto (visible on local PC, headless on Render). Set true/false to override.
     PLAYWRIGHT_HEADLESS: bool | None = None
 
     # Facebook session cookies (restored on each scan)

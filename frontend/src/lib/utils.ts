@@ -47,8 +47,24 @@ export function formatDuration(seconds: number) {
   return `${m} min ${s} sec`
 }
 
+/** Clamp stale DB values (e.g. old 30–45 s) to the safe minimum. */
+export function normalizeIntervalBounds(
+  minSec?: number | null,
+  maxSec?: number | null,
+): { min: number; max: number } {
+  let min = minSec ?? DEFAULT_SCAN_MIN_SECONDS
+  let max = maxSec ?? DEFAULT_SCAN_MAX_SECONDS
+  if (min > max) {
+    ;[min, max] = [max, min]
+  }
+  min = Math.max(MIN_SCAN_INTERVAL_SECONDS, min)
+  max = Math.max(min, max)
+  return { min, max }
+}
+
 /** User-facing check interval, e.g. "90–120 sec (random)" */
 export function formatIntervalRange(minSec: number, maxSec: number) {
-  if (minSec === maxSec) return `${minSec} sec`
-  return `${minSec}–${maxSec} sec (random)`
+  const { min, max } = normalizeIntervalBounds(minSec, maxSec)
+  if (min === max) return `${min} sec`
+  return `${min}–${max} sec (random)`
 }
