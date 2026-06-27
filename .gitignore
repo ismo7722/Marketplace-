@@ -47,6 +47,7 @@ pnpm-debug.log*
 # =========================
 .vscode/
 .idea/
+*.code-workspace
 *.swp
 .DS_Store
 Thumbs.db
