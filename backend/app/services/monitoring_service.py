@@ -273,7 +273,15 @@ class MonitoringService:
         db.commit()
 
         stats = {"processed": 0, "matched": 0, "notified": 0, "duplicates": 0, "errors": 0, "login_required": False}
-        log_activity(db, LogCategory.MONITORING, "Bot ON — monitoring started", source="monitor")
+        if force:
+            log_activity(db, LogCategory.MONITORING, "Bot ON — monitoring started", source="monitor")
+        else:
+            log_activity(
+                db,
+                LogCategory.MONITORING,
+                "Monitoring cycle — scroll, read listings and match filters",
+                source="monitor",
+            )
         db.commit()
 
         try:
@@ -371,12 +379,14 @@ class MonitoringService:
 
                 log_activity(
                     db, LogCategory.MONITORING,
-                    f"Filter matching: {len(raw_listings)} checked in detail — only full matches saved",
+                    f"Filter matching — {filter_name}: {len(raw_listings)} listing(s) from Stage 5",
                     details={"filter": db_filter.name, "checked_in_detail": len(raw_listings)},
                     source="monitor",
                 )
 
                 skipped_non_match = 0
+                filter_matched = 0
+                filter_duplicates = 0
                 for raw in raw_listings:
                     stats["processed"] += 1
                     content_hash = listing_to_hash(raw)
@@ -387,6 +397,7 @@ class MonitoringService:
 
                     if existing:
                         stats["duplicates"] += 1
+                        filter_duplicates += 1
                         continue
 
                     is_match, match_result = self.matching_engine.is_full_match(raw, criteria)
@@ -395,6 +406,7 @@ class MonitoringService:
                         continue
 
                     stats["matched"] += 1
+                    filter_matched += 1
                     listing = self._save_listing(
                         db, raw, content_hash, match_result.score, db_filter.id,
                         match_result.details, ListingStatus.MATCHED, False
@@ -416,13 +428,23 @@ class MonitoringService:
                             listing.notification_sent = True
                             db.commit()
 
-                if skipped_non_match:
-                    log_activity(
-                        db, LogCategory.MONITORING,
-                        f"Skipped {skipped_non_match} listings — did not match all filter criteria",
-                        details={"filter": db_filter.name, "matched": stats["matched"]},
-                        source="monitor",
-                    )
+                log_activity(
+                    db,
+                    LogCategory.MONITORING,
+                    (
+                        f"Filter '{filter_name}' results — "
+                        f"{filter_matched} matched and saved, "
+                        f"{filter_duplicates} already in database, "
+                        f"{skipped_non_match} skipped (did not match criteria)"
+                    ),
+                    details={
+                        "filter": db_filter.name,
+                        "matched": filter_matched,
+                        "duplicates": filter_duplicates,
+                        "skipped": skipped_non_match,
+                    },
+                    source="monitor",
+                )
 
             now = datetime.now(timezone.utc)
             monitoring = db.query(MonitoringSetting).first()
@@ -446,12 +468,40 @@ class MonitoringService:
                             source="monitor",
                         )
                     else:
-                        next_at = schedule_next_scan(monitoring, now)
-                        delay_sec = int((next_at - now).total_seconds())
+                        scheduled = schedule_next_scan(monitoring, now)
+                        min_s, max_s = scheduled.interval_min_seconds, scheduled.interval_max_seconds
+                        delay_sec = scheduled.delay_seconds
                         log_activity(
-                            db, LogCategory.MONITORING,
-                            f"Next listings check in {delay_sec}s",
-                            details={"next_at": next_at.isoformat(), "delay_seconds": delay_sec},
+                            db,
+                            LogCategory.MONITORING,
+                            (
+                                f"Cycle complete — {stats['processed']} checked, "
+                                f"{stats['matched']} matched, "
+                                f"{stats['duplicates']} already seen, "
+                                f"{stats['notified']} alert(s) sent"
+                            ),
+                            details={
+                                "processed": stats["processed"],
+                                "matched": stats["matched"],
+                                "duplicates": stats["duplicates"],
+                                "notified": stats["notified"],
+                                "errors": stats["errors"],
+                            },
+                            source="monitor",
+                        )
+                        log_activity(
+                            db,
+                            LogCategory.MONITORING,
+                            (
+                                f"Waiting {delay_sec}s before next scroll and check "
+                                f"(random from {min_s}–{max_s}s interval)"
+                            ),
+                            details={
+                                "delay_seconds": delay_sec,
+                                "interval_min_seconds": min_s,
+                                "interval_max_seconds": max_s,
+                                "next_at": scheduled.next_at.isoformat(),
+                            },
                             source="monitor",
                         )
                 else:
@@ -468,11 +518,6 @@ class MonitoringService:
             if stats.get("login_required"):
                 await self.facebook.release_browser(db, keep_open=False)
                 return {"status": "login_required", **stats}
-
-            log_activity(
-                db, LogCategory.MONITORING, "Listings check complete — waiting for next refresh",
-                details=stats, source="monitor"
-            )
 
             await self.facebook.release_browser(db, keep_open=True)
             return {"status": "completed", **stats}

@@ -6,6 +6,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.db_async import run_sync
+from app.models import LogCategory
+from app.services.log_service import log_activity_isolated
 from app.services.monitoring_runner import run_async_in_thread
 from app.services.monitoring_service import monitoring_service
 
@@ -66,6 +68,11 @@ async def check_monitoring_due():
         logger.info(
             "Monitoring interval reached — reloading /vehicles (due %s)",
             monitoring.next_scan_at.isoformat() if monitoring.next_scan_at else "now",
+        )
+        log_activity_isolated(
+            LogCategory.MONITORING,
+            "Interval reached — starting next scroll and listings check",
+            source="monitor",
         )
 
         async def _run_scheduled_scan() -> None:

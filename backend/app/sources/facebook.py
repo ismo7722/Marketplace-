@@ -191,8 +191,11 @@ class FacebookMarketplaceSource(BaseMarketplaceSource):
 
         listings = [_item_to_listing(item) for item in items]
         log(
-            "Stage 5/5 — Monitoring complete",
-            {"listings_on_page": on_page, "checked_in_detail": len(listings)},
+            "Stage 5/5 — Scroll and read complete — passing listings to filter matcher",
+            {
+                "listings_on_page": on_page,
+                "cards_read": len(listings),
+            },
         )
         return listings
 
