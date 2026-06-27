@@ -14,6 +14,7 @@ from app.services.browser_launch import launch_chromium, launch_facebook_context
 from app.services.browser_settings import get_playwright_headless, get_playwright_timeout
 from app.services.scan_control import is_scan_cancelled
 from app.services.facebook_session import (
+    has_login_cookies,
     is_login_fully_complete,
     is_on_facebook_auth_flow,
     needs_marketplace_navigation,
@@ -219,10 +220,13 @@ class FacebookMarketplaceSource(BaseMarketplaceSource):
             return False
 
     async def save_session_and_release(self, db: Session | None = None) -> None:
-        """Persist cookies before closing so the next Start reuses login."""
+        """Close browser — only overwrite Neon session when still logged in."""
         if self._context and self.has_live_browser():
             try:
-                await save_session(self._context, self._playwright_settings())
+                if await has_login_cookies(self._context):
+                    await save_session(self._context, self._playwright_settings())
+                else:
+                    logger.info("Skip session save on stop — browser not logged in (Neon session kept)")
             except Exception as exc:
                 logger.warning("Could not save session before browser close: %s", exc)
         await self.release_browser(db, keep_open=False)
@@ -433,6 +437,13 @@ class FacebookMarketplaceSource(BaseMarketplaceSource):
             if not await stage_ensure_login(page, context, cfg, log, db):
                 raise RuntimeError("Facebook login not completed — run login-facebook.bat then Stop → Start")
 
+            if headless:
+                from app.config import is_cloud_host
+                from app.services.browser_launch import enable_lightweight_browsing
+
+                if is_cloud_host():
+                    await enable_lightweight_browsing(context)
+
             await self._ensure_marketplace_ready(page, context, cfg, log, nav_timeout=nav_timeout)
 
             session_valid = self._is_filters_session_valid(page, location, scrape_params)
@@ -534,6 +545,7 @@ class FacebookMarketplaceSource(BaseMarketplaceSource):
             from app.services.facebook_errors import FacebookLoginRequiredError
 
             if isinstance(exc, FacebookLoginRequiredError):
+                await self.release_browser(db, keep_open=False)
                 raise
             logger.exception("Facebook monitoring failed: %s", exc)
             log("Scan failed — see error details", {"error": str(exc)}, level=LogLevel.WARNING)

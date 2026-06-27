@@ -15,6 +15,8 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/app/backend/playwright-browsers
 # Install Playwright browsers and OS deps
 RUN python -m playwright install --with-deps || true
 
+RUN mkdir -p /app/backend/data
+
 EXPOSE 8000
 ENV PORT=8000
 

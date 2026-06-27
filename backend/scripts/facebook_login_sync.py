@@ -29,8 +29,9 @@ async def main() -> int:
     settings = get_settings()
     print("=" * 60)
     print("Facebook Login — visible Chromium window will open")
-    print("Log in to Facebook (including 2FA). Session saves to your database.")
-    print("After this, Render can run ALL stages headless.")
+    print("Log in to Facebook (including 2FA). Session saves to Neon database.")
+    print("Use the SAME DATABASE_URL on PC and Render.")
+    print("After this, Render runs all 5 stages headless.")
     print("=" * 60)
 
     run_blocking_startup(settings)
@@ -41,8 +42,8 @@ async def main() -> int:
         persist_session_file_to_db(settings)
         status = get_facebook_session_status()
         if status.get("has_session"):
-            print("\nSUCCESS — Facebook session saved.")
-            print("Dashboard: Stop → Start — 5-step monitoring runs headless on the server.")
+            print("\nSUCCESS — Facebook session saved to database.")
+            print("Dashboard: Stop → Start — monitoring runs headless on Render.")
             return 0
         print("\nFAILED — session was not saved. Complete Facebook login and try again.")
         return 1

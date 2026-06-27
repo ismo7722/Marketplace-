@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 import csv
 import io
 
+from app.config import get_settings
 from app.core.deps import get_current_user, require_admin
 from app.database import get_db, with_db_retry
 from app.db_async import run_sync
@@ -369,22 +370,6 @@ async def send_test_email(
     if not success:
         raise HTTPException(status_code=400, detail=result)
     return {"message": result, "sent_to": to_email}
-
-
-@router.post("/notifications/test-login-reminder")
-async def send_test_login_reminder(
-    _: User = Depends(require_admin),
-):
-    """Send the same email users get when Facebook login is pending after 5 minutes."""
-    from app.services.login_reminder_service import send_facebook_login_reminder
-
-    sent = await send_facebook_login_reminder()
-    if not sent:
-        raise HTTPException(
-            status_code=400,
-            detail="Could not send login reminder — configure SMTP in backend .env and ADMIN_EMAIL or alert recipients",
-        )
-    return {"message": "Login reminder test email sent"}
 
 
 @router.get("/notifications", response_model=dict)

@@ -127,7 +127,6 @@ export const updateRecipient = (id: number, data: { email: string; name?: string
 export const deleteRecipient = (id: number) => api.delete(`/notification-recipients/${id}`)
 export const sendTestEmail = (email?: string) =>
   api.post("/notifications/test-email", email ? { email } : {})
-export const sendTestLoginReminder = () => api.post("/notifications/test-login-reminder")
 
 // Settings & Logs
 export const getSettings = () => api.get("/settings")

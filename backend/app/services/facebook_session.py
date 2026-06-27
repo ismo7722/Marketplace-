@@ -345,34 +345,14 @@ async def wait_passive_for_login(
     *,
     timeout_seconds: int = 900,
 ) -> bool:
-    """
-    Bot is completely static while user logs in manually.
-    After 5 minutes without login, sends one email reminder to admin/alert recipients.
-    """
-    from app.services.login_reminder_service import (
-        LOGIN_REMINDER_AFTER_SECONDS,
-        send_facebook_login_reminder,
-    )
-
+    """Bot is completely static while user logs in manually (login-facebook.bat window)."""
     deadline = time.monotonic() + timeout_seconds
-    started = time.monotonic()
-    reminder_sent = False
 
     while time.monotonic() < deadline:
         if is_scan_cancelled():
             return False
         if await is_login_fully_complete(context, page):
             return True
-
-        elapsed = time.monotonic() - started
-        if not reminder_sent and elapsed >= LOGIN_REMINDER_AFTER_SECONDS:
-            reminder_sent = True
-            logger.info("Facebook login still pending after 5 minutes — sending reminder email")
-            try:
-                await send_facebook_login_reminder()
-            except Exception as exc:
-                logger.warning("Login reminder email failed: %s", exc)
-
         await asyncio.sleep(PASSIVE_LOGIN_POLL_SECONDS)
     return False
 

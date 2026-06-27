@@ -78,9 +78,8 @@ def _context_kwargs(cfg: Settings, *, headless: bool) -> dict:
         "viewport": viewport,
         "device_scale_factor": 1,
         "screen": {"width": viewport["width"], "height": viewport["height"]},
+        "user_agent": USER_AGENT,
     }
-    if headless:
-        kwargs["user_agent"] = USER_AGENT
     path: Path = session_file(cfg)
     if path.exists():
         kwargs["storage_state"] = str(path)
@@ -119,8 +118,6 @@ async def launch_facebook_context(
             raise RuntimeError(hint) from exc
         raise
     context = await browser.new_context(**_context_kwargs(cfg, headless=headless))
-    if is_cloud_host() or headless:
-        await enable_lightweight_browsing(context)
     page = await context.new_page()
     if not headless:
         await page.set_viewport_size(_viewport_for_host(headless=headless))

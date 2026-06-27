@@ -19,7 +19,7 @@ backend/**/__pycache__/
 .mypy_cache/
 .ruff_cache/
 
-# Local SQLite (legacy); production uses Neon in .env
+# Local SQLite (optional dev); production uses Neon DATABASE_URL in .env
 backend/*.db
 backend/**/*.db
 

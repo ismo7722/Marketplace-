@@ -2,6 +2,7 @@ import enum
 import logging
 import time
 from collections.abc import Generator
+from pathlib import Path
 
 from sqlalchemy import Enum, create_engine, event, text
 from sqlalchemy.exc import OperationalError, TimeoutError as SATimeoutError
@@ -73,12 +74,35 @@ if _is_postgres():
             cursor.close()
 
 
+def _sqlite_path_from_url(url: str) -> Path | None:
+    if not url.startswith("sqlite:///"):
+        return None
+    raw = url[len("sqlite:///") :]
+    return Path(raw) if raw.startswith("/") else Path(raw)
+
+
+def _ensure_sqlite_directory() -> None:
+    if not _is_sqlite():
+        return
+    db_path = _sqlite_path_from_url(settings.DATABASE_URL)
+    if db_path is None:
+        return
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+
+_ensure_sqlite_directory()
+
+
 if _is_sqlite():
 
     @event.listens_for(engine, "connect")
     def set_sqlite_pragma(dbapi_connection, _connection_record):
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA temp_store=MEMORY")
+        cursor.execute("PRAGMA cache_size=-64000")
         cursor.close()
 
 

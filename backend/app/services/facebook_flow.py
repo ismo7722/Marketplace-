@@ -452,14 +452,11 @@ async def stage_open_marketplace(
                 "Stage 3/5 — Not logged in — log in using Email/Password in the top header",
                 {"url": page.url},
             )
-        log(
-            "Stage 3/5 — Bot idle on Marketplace (login reminder email after 5 minutes)",
-        )
+        log("Stage 3/5 — Bot idle on Marketplace (waiting for login in browser)")
 
 
 async def stage_ensure_login(page: Page, context: BrowserContext, cfg: Settings, log: LogFn, db: Session | None = None) -> bool:
     from app.services.facebook_errors import FacebookLoginRequiredError, LOGIN_REQUIRED_LOG
-    from app.services.login_reminder_service import send_facebook_logout_alert
 
     log("Stage 2/5 — Checking Facebook login")
     restore_session_file_from_db(cfg)
@@ -469,37 +466,65 @@ async def stage_ensure_login(page: Page, context: BrowserContext, cfg: Settings,
     nav_timeout = max(cfg.PLAYWRIGHT_TIMEOUT, 120000)
 
     async def _fail_logged_out() -> None:
-        log(f"Stage 2/5 — {LOGIN_REQUIRED_LOG}", level=LogLevel.WARNING)
-        await send_facebook_logout_alert()
+        has_cookies = await has_login_cookies(context)
+        log(
+            f"Stage 2/5 — {LOGIN_REQUIRED_LOG}",
+            {"url": page.url, "has_c_user_xs_cookies": has_cookies},
+            level=LogLevel.WARNING,
+        )
         raise FacebookLoginRequiredError(LOGIN_REQUIRED_LOG)
 
-    if headless and on_server:
+    async def _inject_session_cookies() -> None:
+        path = session_file(cfg)
+        if not path.exists() or path.stat().st_size < 20:
+            return
+        try:
+            import json
+
+            state = json.loads(path.read_text(encoding="utf-8"))
+            cookies = state.get("cookies") or []
+            if cookies:
+                await context.add_cookies(cookies)
+        except Exception as exc:
+            logger.warning("Could not inject session cookies: %s", exc)
+
+    # Headless (Render or local) — never wait for manual login; session file/DB only.
+    if headless:
         if not has_facebook_session_saved(cfg):
             await _fail_logged_out()
 
+        await _inject_session_cookies()
+
         blank = page.url in ("about:blank", "") or page.url.startswith("chrome://")
-        if needs_marketplace_navigation(page) or blank:
-            log("Stage 2/5 — Loading saved Facebook session on Marketplace")
-            await page.goto(
-                MARKETPLACE_URL,
-                wait_until="domcontentloaded",
-                timeout=nav_timeout,
-            )
-            await asyncio.sleep(POST_LOGIN_SETTLE_SECONDS)
+        for attempt in range(1, 7):
+            if needs_marketplace_navigation(page) or blank or attempt == 1:
+                log(
+                    "Stage 2/5 — Loading saved Facebook session on Marketplace",
+                    {"attempt": attempt},
+                )
+                await page.goto(
+                    MARKETPLACE_URL,
+                    wait_until="domcontentloaded",
+                    timeout=nav_timeout,
+                )
+                await asyncio.sleep(POST_LOGIN_SETTLE_SECONDS)
 
-        if await is_login_fully_complete(context, page):
-            log("Stage 2/5 — Logged in (saved session from database)")
-            await save_session(context, cfg)
-            return True
-
-        if await has_login_cookies(context):
-            log("Stage 2/5 — Session cookies loaded — refreshing Marketplace")
-            await reload_marketplace_after_login(page, cfg)
-            await asyncio.sleep(POST_LOGIN_SETTLE_SECONDS)
             if await is_login_fully_complete(context, page):
                 log("Stage 2/5 — Logged in (saved session from database)")
                 await save_session(context, cfg)
                 return True
+
+            if await has_login_cookies(context):
+                log("Stage 2/5 — Session cookies loaded — refreshing Marketplace")
+                await reload_marketplace_after_login(page, cfg)
+                await asyncio.sleep(POST_LOGIN_SETTLE_SECONDS)
+                if await is_login_fully_complete(context, page):
+                    log("Stage 2/5 — Logged in (saved session from database)")
+                    await save_session(context, cfg)
+                    return True
+
+            if attempt < 6:
+                await asyncio.sleep(3)
 
         await _fail_logged_out()
 
@@ -515,7 +540,7 @@ async def stage_ensure_login(page: Page, context: BrowserContext, cfg: Settings,
             if await dismiss_login_popup_once(page):
                 log("Stage 2/5 — Login popup closed — use top header Email/Password to log in")
         log(
-            "Stage 2/5 — Not logged in — log in in the Chromium window (reminder email after 5 minutes)",
+            "Stage 2/5 — Not logged in — log in in the Chromium window",
             {"url": page.url},
         )
 

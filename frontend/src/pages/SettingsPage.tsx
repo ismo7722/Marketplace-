@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 import { Shield, Bell, Send, Trash2, Plus, Monitor, Eraser, Clock } from "lucide-react"
 import {
   getSettings, updateSettings, changePassword, clearBrowserSession, getFacebookSessionStatus,
-  getRecipients, addRecipient, deleteRecipient, sendTestEmail, sendTestLoginReminder,
+  getRecipients, addRecipient, deleteRecipient, sendTestEmail,
   getMonitoringSettings, updateMonitoringSettings,
 } from "@/lib/api"
 import { useAuth } from "@/contexts/AuthContext"
@@ -23,7 +23,6 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false)
   const [clearingSession, setClearingSession] = useState(false)
   const [sending, setSending] = useState(false)
-  const [sendingReminder, setSendingReminder] = useState(false)
   const [currentPassword, setCurrentPassword] = useState("")
   const [newPassword, setNewPassword] = useState("")
   const [minSeconds, setMinSeconds] = useState("30")
@@ -152,20 +151,6 @@ export default function SettingsPage() {
     }
   }
 
-  const handleTestLoginReminder = async () => {
-    setSendingReminder(true)
-    try {
-      await sendTestLoginReminder()
-      toast("Login reminder test email sent", "success")
-    } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-        || "Failed — configure SMTP in backend .env"
-      toast(msg, "error")
-    } finally {
-      setSendingReminder(false)
-    }
-  }
-
   const handleChangePassword = async () => {
     try {
       await changePassword(currentPassword, newPassword)
@@ -254,19 +239,10 @@ export default function SettingsPage() {
                 value={testEmail}
                 onChange={(e) => setTestEmail(e.target.value)}
               />
-              <Button variant="outline" onClick={handleTestEmail} disabled={sending || sendingReminder}>
+              <Button variant="outline" onClick={handleTestEmail} disabled={sending}>
                 {sending ? <Spinner /> : <><Send className="h-4 w-4" /> Test alert</>}
               </Button>
             </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-xs"
-              onClick={handleTestLoginReminder}
-              disabled={sending || sendingReminder}
-            >
-              {sendingReminder ? <Spinner /> : "Test login reminder email (same as 5-min Facebook wait)"}
-            </Button>
           </div>
         </CardContent>
       </Card>
