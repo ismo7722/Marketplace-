@@ -1,0 +1,13 @@
+venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.env
+.env.*
+*.db
+data/*
+!data/.gitkeep
+playwright-browsers/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

@@ -1,12 +1,13 @@
-# Render service configuration (example). Fill repo/branch as needed.
+# Render Blueprint — backend only (Root Directory = backend)
 version: 0
 services:
   - type: web
     name: facebook-monitoring-backend
     env: docker
     plan: free
-    branch: main
-    dockerfilePath: Dockerfile
+    branch: master
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
     envVars:
       - key: DATABASE_URL
         value: ""
@@ -16,10 +17,14 @@ services:
         value: ""
       - key: ADMIN_EMAIL
         value: ""
+      - key: ADMIN_PASSWORD
+        value: ""
+      - key: CORS_ORIGINS
+        value: ""
       - key: SMTP_HOST
-        value: ""
+        value: smtp.gmail.com
       - key: SMTP_PORT
-        value: ""
+        value: "587"
       - key: SMTP_USER
         value: ""
       - key: SMTP_PASSWORD
